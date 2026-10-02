@@ -41,10 +41,12 @@ async def _run_webhook(bot: Bot, dp: Dispatcher, app: web.Application, settings:
     tg = settings.telegram
     secret = tg.webhook_secret_token.get_secret_value() if tg.webhook_secret_token else None
     # SimpleRequestHandler rejects requests without a matching
-    # X-Telegram-Bot-Api-Secret-Token header.
-    SimpleRequestHandler(dispatcher=dp, bot=bot, secret_token=secret).register(
-        app, path=tg.webhook_path
-    )
+    # X-Telegram-Bot-Api-Secret-Token header. Updates are processed before responding:
+    # if processing fails (e.g. DB outage) Telegram gets an error and redelivers the
+    # update, which is safe because message processing is idempotent.
+    SimpleRequestHandler(
+        dispatcher=dp, bot=bot, secret_token=secret, handle_in_background=False
+    ).register(app, path=tg.webhook_path)
     setup_application(app, dp, bot=bot)
 
     async def on_startup(_: web.Application) -> None:

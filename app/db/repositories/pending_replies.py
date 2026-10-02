@@ -95,6 +95,15 @@ class PendingReplyRepository:
         )
         return (await self._session.scalars(stmt)).all()
 
+    async def lock_open(self, chat_id: int) -> Sequence[PendingReply]:
+        stmt = (
+            select(PendingReply)
+            .where(PendingReply.chat_id == chat_id, PendingReply.status.in_(OPEN_STATUSES))
+            .order_by(PendingReply.id)
+            .with_for_update()
+        )
+        return (await self._session.scalars(stmt)).all()
+
     async def count_open(self, chat_id: int) -> int:
         stmt = select(func.count()).where(
             PendingReply.chat_id == chat_id, PendingReply.status.in_(OPEN_STATUSES)

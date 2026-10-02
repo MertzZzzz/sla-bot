@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from app.core.config import AppSettings
-from app.core.enums import ChatConfigAction, ChatType
+from app.core.enums import ChatConfigAction, ChatType, PendingReplyStatus, ReplyEventType
 from app.db.models import MonitoredChat, TelegramUser
 from app.db.uow import UnitOfWork
 from app.schemas.chats import (
@@ -97,6 +97,8 @@ class ChatSettingsService:
             old = _jsonable(chat, fields)
             updated = await uow.chats.update_fields(chat.id, values)
             new = _jsonable(updated, fields)
+            if values.get("is_enabled") is False:
+                await self._cancel_open_tickets(uow, chat.id, actor_id)
             if old != new:
                 await self._audit.record_chat_change(
                     uow,
@@ -109,6 +111,20 @@ class ChatSettingsService:
             result = MonitoredChatRead.model_validate(updated)
             await uow.commit()
         return result
+
+    @staticmethod
+    async def _cancel_open_tickets(uow: UnitOfWork, chat_id: int, actor_id: int) -> None:
+        """Monitoring is off: open tickets will never be escalated, so close them as
+        ``cancelled`` (excluded from SLA metrics) instead of leaving them open forever."""
+        for ticket in await uow.pending.lock_open(chat_id):
+            previous = ticket.status
+            ticket.status = PendingReplyStatus.CANCELLED
+            await uow.audit.add_reply_event(
+                ticket.id,
+                ReplyEventType.CANCELLED,
+                actor_telegram_user_id=actor_id,
+                metadata={"reason": "chat_disabled", "previous_status": previous.value},
+            )
 
     @staticmethod
     def _action_for(values: dict[str, Any]) -> ChatConfigAction:

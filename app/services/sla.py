@@ -33,6 +33,10 @@ class SlaService:
         self._clock = clock
         self._settings = settings
 
+    @property
+    def batch_size(self) -> int:
+        return self._settings.scan_batch_size
+
     def escalate_due(self) -> list[int]:
         """Mark a batch of due tickets ``overdue`` and create outbox events atomically.
 

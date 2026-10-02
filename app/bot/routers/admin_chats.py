@@ -119,7 +119,7 @@ async def cmd_disable(message: Message, services: BotServices) -> None:
         message,
         services,
         MonitoredChatUpdate(is_enabled=False),
-        "⏸ Мониторинг выключен. История и открытые ожидания сохранены.",
+        "⏸ Мониторинг выключен. История сохранена, открытые ожидания отменены.",
     )
 
 

@@ -1,0 +1,83 @@
+from __future__ import annotations
+
+from datetime import timedelta
+
+import pytest
+
+from app.core.config import CelerySettings
+from app.services.formatting import TELEGRAM_MESSAGE_LIMIT
+from app.services.notifications import (
+    NotificationConfigError,
+    backoff_seconds,
+    not_required_line,
+    render_notification,
+)
+from tests.factories import T0, payload
+
+
+def test_render_contains_required_fields() -> None:
+    now = T0 + timedelta(minutes=20)
+    rendered = render_notification(payload(), now)
+    text = rendered.text
+    assert text.startswith("🔴 <b>SLA нарушен</b>")
+    assert "Чат: <b>Поддержка VIP</b>" in text
+    assert "Приоритет: P1" in text
+    assert "SLA: 15 мин" in text
+    assert 'Ответственный: <a href="tg://user?id=2000">Иван Иванов</a>' in text
+    assert "Сообщение от: Клиент" in text
+    assert "Получено: 15.01.2026 12:00:00 (Europe/Moscow)" in text
+    assert "Просрочка: 5 мин" in text
+    assert "Текст: Где мой заказ?" in text
+    assert '<a href="https://t.me/c/1234567890/10">Открыть сообщение</a>' in text
+    assert rendered.target_chat_id == -100555
+    assert rendered.target_thread_id == 7
+
+
+def test_render_escapes_user_content() -> None:
+    p = payload(
+        source_text="<script>alert(1)</script> & co",
+        chat_title="<b>Chat</b>",
+        author_name="<i>Evil</i>",
+        responsible_name="<u>Resp</u>",
+    )
+    text = render_notification(p, T0).text
+    assert "<script>" not in text
+    assert "&lt;script&gt;" in text
+    assert "&lt;b&gt;Chat&lt;/b&gt;" in text
+    assert "&lt;i&gt;Evil&lt;/i&gt;" in text
+    assert "&lt;u&gt;Resp&lt;/u&gt;" in text
+
+
+def test_render_respects_telegram_limit_even_after_escaping() -> None:
+    text = render_notification(payload(source_text="&<>" * 5000), T0).text
+    assert len(text) <= TELEGRAM_MESSAGE_LIMIT
+
+
+def test_render_without_responsible_link_and_text() -> None:
+    p = payload(
+        responsible_telegram_id=None,
+        responsible_name=None,
+        message_link=None,
+        source_text=None,
+        source_content_type="photo",
+    )
+    text = render_notification(p, T0).text
+    assert "Ответственный: не назначен" in text
+    assert "Текст: [Фото]" in text
+    assert "Открыть сообщение" not in text
+
+
+def test_render_requires_target_chat() -> None:
+    with pytest.raises(NotificationConfigError):
+        render_notification(payload(target_chat_id=None), T0)
+
+
+def test_not_required_line() -> None:
+    line = not_required_line("<Админ>", 1000)
+    assert line == '✅ Ответ не требуется. Отметил: <a href="tg://user?id=1000">&lt;Админ&gt;</a>'
+
+
+def test_backoff_is_exponential_and_capped() -> None:
+    settings = CelerySettings(retry_backoff_base_seconds=5, retry_backoff_max_seconds=60)
+    assert [backoff_seconds(a, settings) for a in (1, 2, 3, 4, 5)] == [5, 10, 20, 40, 60]
+    assert backoff_seconds(1, settings, retry_after=30) == 30

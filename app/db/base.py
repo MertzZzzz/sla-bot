@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import StrEnum
-from typing import Any
+from typing import Any, ClassVar
 
 from sqlalchemy import DateTime, Enum, MetaData, func
 from sqlalchemy.dialects.postgresql import JSONB
@@ -37,6 +37,10 @@ def pg_enum(enum_cls: type[StrEnum], name: str) -> Enum:
 
 
 class TimestampMixin:
+    # Fetch server-generated timestamps via RETURNING on flush; otherwise they are
+    # expired and would trigger implicit (forbidden) IO under asyncio.
+    __mapper_args__: ClassVar[dict[str, Any]] = {"eager_defaults": True}
+
     created_at: Mapped[datetime] = mapped_column(server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         server_default=func.now(), onupdate=func.now(), nullable=False
