@@ -143,26 +143,44 @@ class ChatSettingsService:
         async with self._uow_factory() as uow:
             chat = await self._require(uow, telegram_chat_id, for_update=True)
             user = await uow.users.upsert(user_data, self._clock.now())
-            old_id = await self._responsible_tg_id(uow, chat)
-            chat.responsible_user_id = user.id
-            added = False
-            if self._defaults.auto_add_responsible_as_responder:
-                added = await uow.responders.add(chat.id, user.id, actor_id)
-            await self._audit.record_chat_change(
-                uow,
-                chat_id=chat.id,
-                actor_telegram_user_id=actor_id,
-                action=ChatConfigAction.RESPONSIBLE_CHANGED,
-                old_value={"responsible_telegram_id": old_id},
-                new_value={
-                    "responsible_telegram_id": user.telegram_user_id,
-                    "auto_responder": added,
-                },
-            )
+            added = await self.assign_responsible(uow, chat, user, actor_id, source="command")
             await uow.session.flush()
             result = MonitoredChatRead.model_validate(chat)
             await uow.commit()
         return result, added
+
+    async def assign_responsible(
+        self,
+        uow: UnitOfWork,
+        chat: MonitoredChat,
+        user: TelegramUser,
+        actor_id: int,
+        *,
+        source: str,
+    ) -> bool:
+        """Set the chat's responsible inside the caller's transaction (chat row locked).
+
+        Affects new tickets only: existing tickets keep their responsible snapshot.
+        Returns whether the user was auto-added to responders.
+        """
+        old_id = await self._responsible_tg_id(uow, chat)
+        chat.responsible_user_id = user.id
+        added = False
+        if self._defaults.auto_add_responsible_as_responder:
+            added = await uow.responders.add(chat.id, user.id, actor_id)
+        await self._audit.record_chat_change(
+            uow,
+            chat_id=chat.id,
+            actor_telegram_user_id=actor_id,
+            action=ChatConfigAction.RESPONSIBLE_CHANGED,
+            old_value={"responsible_telegram_id": old_id},
+            new_value={
+                "responsible_telegram_id": user.telegram_user_id,
+                "auto_responder": added,
+                "source": source,
+            },
+        )
+        return added
 
     async def add_responder(
         self, telegram_chat_id: int, user_data: TelegramUserData, actor_id: int

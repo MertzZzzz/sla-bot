@@ -9,9 +9,19 @@ from aiogram.exceptions import (
 )
 from aiogram.methods import SendMessage
 
-from app.bot.keyboards.pending_reply import NOT_REQUIRED_TEXT, not_required_keyboard
+from app.bot.keyboards.pending_reply import (
+    BACK_TEXT,
+    NOT_REQUIRED_TEXT,
+    REASSIGN_CHAT_TEXT,
+    REASSIGN_TICKET_TEXT,
+    candidates_keyboard,
+    notification_keyboard,
+)
 from app.bot.sender import map_telegram_error
+from app.schemas.callbacks import ReassignAction
+from app.schemas.users import TelegramUserRead
 from app.services.telegram_sender import PermanentDeliveryError, TransientDeliveryError
+from tests.factories import T0
 
 METHOD = SendMessage(chat_id=1, text="x")
 
@@ -38,7 +48,35 @@ def test_permanent_errors() -> None:
 
 
 def test_keyboard() -> None:
-    keyboard = not_required_keyboard(5)
-    button = keyboard.inline_keyboard[0][0]
-    assert button.text == NOT_REQUIRED_TEXT
-    assert button.callback_data == "pr:nr:5"
+    keyboard = notification_keyboard(5)
+    rows = [[(b.text, b.callback_data) for b in row] for row in keyboard.inline_keyboard]
+    assert rows == [
+        [(NOT_REQUIRED_TEXT, "pr:nr:5")],
+        [(REASSIGN_TICKET_TEXT, "ra:mt:5:0")],
+        [(REASSIGN_CHAT_TEXT, "ra:mc:5:0")],
+    ]
+
+
+def test_candidates_keyboard() -> None:
+    users = [
+        TelegramUserRead(
+            id=i,
+            telegram_user_id=100 + i,
+            username=None,
+            first_name=None,
+            last_name=None,
+            display_name=f"User {i}",
+            is_bot=False,
+            last_seen_at=T0,
+        )
+        for i in range(2)
+    ]
+    keyboard = candidates_keyboard(7, ReassignAction.SET_TICKET, users)
+    rows = [[(b.text, b.callback_data) for b in row] for row in keyboard.inline_keyboard]
+    assert rows == [
+        [("User 0", "ra:st:7:100")],
+        [("User 1", "ra:st:7:101")],
+        [(BACK_TEXT, "ra:bk:7:0")],
+    ]
+    for row in keyboard.inline_keyboard:
+        assert len((row[0].callback_data or "").encode()) < 64

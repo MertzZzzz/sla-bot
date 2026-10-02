@@ -10,6 +10,7 @@ from aiogram import Bot, Dispatcher
 from aiogram.client.session.base import BaseSession
 from aiogram.methods import (
     AnswerCallbackQuery,
+    EditMessageReplyMarkup,
     EditMessageText,
     GetMe,
     SendMessage,
@@ -27,7 +28,8 @@ from aiogram.types import (
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.bot.dispatcher import build_dispatcher
-from app.bot.keyboards.pending_reply import not_required_keyboard
+from app.bot.extractors import user_data
+from app.bot.keyboards.pending_reply import notification_keyboard
 from app.bot.services import BotServices
 from app.core.config import Settings
 from app.core.enums import PendingReplyStatus, Priority
@@ -113,13 +115,19 @@ def command(
     return Update(update_id=_next_id(), message=message)
 
 
-def press(sender: User, pending_reply_id: int, markup: InlineKeyboardMarkup) -> Update:
+def press(
+    sender: User,
+    pending_reply_id: int,
+    markup: InlineKeyboardMarkup,
+    row: int = 0,
+    text: str = "🔴 SLA нарушен\n\nТекст: <тест>",
+) -> Update:
     notification = Message(
         message_id=555,
         date=T0,
         chat=NOTIFY,
         from_user=BOT_USER,
-        text="🔴 SLA нарушен\n\nТекст: <тест>",
+        text=text,
         reply_markup=markup,
     )
     callback = CallbackQuery(
@@ -127,7 +135,7 @@ def press(sender: User, pending_reply_id: int, markup: InlineKeyboardMarkup) -> 
         from_user=sender,
         chat_instance="ci",
         message=notification,
-        data=markup.inline_keyboard[0][0].callback_data,
+        data=markup.inline_keyboard[row][0].callback_data,
     )
     return Update(update_id=_next_id(), callback_query=callback)
 
@@ -222,7 +230,7 @@ async def test_not_required_button(
     await setup_chat(services)
     await services.messages.process(incoming(10, CLIENT, date=clock.now()))
     [ticket] = tickets(sync_factory)
-    markup = not_required_keyboard(ticket.id)
+    markup = notification_keyboard(ticket.id)
 
     await feed(bot, settings, services, press(STRANGER_TG, ticket.id, markup))
     denied = tg.of(AnswerCallbackQuery)[-1]
@@ -241,3 +249,68 @@ async def test_not_required_button(
     await feed(bot, settings, services, press(ADMIN_TG, ticket.id, markup))
     assert "Уже отмечено" in (tg.of(AnswerCallbackQuery)[-1].text or "")
     assert len(tg.of(EditMessageText)) == 1
+
+
+async def test_reassign_ticket_buttons(
+    bot: Bot,
+    tg: RecordingSession,
+    settings: Settings,
+    services: BotServices,
+    sync_factory: sessionmaker[Session],
+    clock: FakeClock,
+) -> None:
+    await setup_chat(services)
+    colleague = User(id=2001, is_bot=False, first_name="Colleague")
+    await services.chats.add_responder(CHAT_ID, user_data(colleague), ADMIN_ID)
+    await services.messages.process(incoming(10, CLIENT, date=clock.now()))
+    [ticket] = tickets(sync_factory)
+    main = notification_keyboard(ticket.id)
+    text = "🔴 SLA нарушен\n\nОтветственный: Responder2000\nТекст: x"
+
+    await feed(bot, settings, services, press(STRANGER_TG, ticket.id, main, row=1))
+    assert "Недостаточно прав" in (tg.of(AnswerCallbackQuery)[-1].text or "")
+
+    await feed(bot, settings, services, press(ADMIN_TG, ticket.id, main, row=1))
+    [menu] = tg.of(EditMessageReplyMarkup)
+    assert menu.reply_markup is not None
+    buttons = [row[0] for row in menu.reply_markup.inline_keyboard]
+    assert [b.callback_data for b in buttons] == [f"ra:st:{ticket.id}:2001", f"ra:bk:{ticket.id}:0"]
+
+    await feed(bot, settings, services, press(ADMIN_TG, ticket.id, menu.reply_markup, text=text))
+    [edit] = tg.of(EditMessageText)
+    assert 'Ответственный: <a href="tg://user?id=2001">Colleague</a>' in edit.text
+    assert "🔁 Ответственный по сообщению:" in edit.text
+    assert edit.reply_markup == main  # main keyboard restored
+    assert tickets(sync_factory)[0].responsible_telegram_id_snapshot == 2001
+
+
+async def test_reassign_chat_button(
+    bot: Bot,
+    tg: RecordingSession,
+    settings: Settings,
+    services: BotServices,
+    sync_factory: sessionmaker[Session],
+    clock: FakeClock,
+) -> None:
+    await setup_chat(services)
+    colleague = User(id=2001, is_bot=False, first_name="Colleague")
+    await services.chats.add_responder(CHAT_ID, user_data(colleague), ADMIN_ID)
+    await services.messages.process(incoming(10, CLIENT, date=clock.now()))
+    [ticket] = tickets(sync_factory)
+    main = notification_keyboard(ticket.id)
+
+    await feed(bot, settings, services, press(ADMIN_TG, ticket.id, main, row=2))
+    menu = tg.of(EditMessageReplyMarkup)[-1].reply_markup
+    assert menu.inline_keyboard[0][0].callback_data == f"ra:sc:{ticket.id}:2001"
+    await feed(bot, settings, services, press(ADMIN_TG, ticket.id, menu))
+    [edit] = tg.of(EditMessageText)
+    assert "👥 Ответственный чата:" in edit.text
+    assert "для новых сообщений" in edit.text
+    details = await services.chats.get_details(CHAT_ID)
+    assert details is not None and details.responsible is not None
+    assert details.responsible.telegram_user_id == 2001
+    assert tickets(sync_factory)[0].responsible_telegram_id_snapshot == 2000
+
+    # "Back" restores the main keyboard.
+    await feed(bot, settings, services, press(ADMIN_TG, ticket.id, menu, row=1))
+    assert tg.of(EditMessageReplyMarkup)[-1].reply_markup == main

@@ -3,7 +3,12 @@ from __future__ import annotations
 import pytest
 
 from app.core.enums import Priority, ReplyMatchMode
-from app.schemas.callbacks import PendingReplyAction, PendingReplyCallbackData
+from app.schemas.callbacks import (
+    PendingReplyAction,
+    PendingReplyCallbackData,
+    ReassignAction,
+    ReassignCallbackData,
+)
 from app.schemas.commands import (
     ChangeModeCommand,
     ChangePriorityCommand,
@@ -77,3 +82,16 @@ def test_callback_data_roundtrip_and_size() -> None:
 def test_callback_data_rejects_garbage() -> None:
     with pytest.raises(ValueError, match="zz"):
         PendingReplyCallbackData.unpack("pr:zz:1")
+
+
+def test_reassign_callback_data() -> None:
+    packed = ReassignCallbackData(
+        action=ReassignAction.SET_CHAT, pending_reply_id=2**63 - 1, user_id=2**63 - 1
+    ).pack()
+    assert len(packed.encode()) < 64
+    parsed = ReassignCallbackData.unpack("ra:st:12:345")
+    assert (parsed.action, parsed.pending_reply_id, parsed.user_id) == (
+        ReassignAction.SET_TICKET,
+        12,
+        345,
+    )

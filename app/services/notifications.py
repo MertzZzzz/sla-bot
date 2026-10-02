@@ -94,6 +94,32 @@ def not_required_line(user_name: str, user_telegram_id: int) -> str:
     return NOT_REQUIRED_LINE.format(user=user_mention(user_telegram_id, user_name))
 
 
+RESPONSIBLE_PREFIX = "Ответственный: "
+
+
+def responsible_label(telegram_id: int | None, name: str | None) -> str:
+    if telegram_id is None:
+        return "не назначен"
+    return user_mention(telegram_id, name or str(telegram_id))
+
+
+def replace_responsible_line(html_text: str, telegram_id: int, name: str) -> str:
+    """Point the "Ответственный:" line of a notification at a new user."""
+    lines = html_text.split("\n")
+    for i, line in enumerate(lines):
+        if line.startswith(RESPONSIBLE_PREFIX):
+            lines[i] = RESPONSIBLE_PREFIX + user_mention(telegram_id, name)
+            break
+    return "\n".join(lines)
+
+
+def reassigned_line(*, chat_scope: bool, old: str, new: str, actor: str) -> str:
+    """Audit line appended to the notification; arguments are ready HTML labels."""
+    if chat_scope:
+        return f"👥 Ответственный чата: {old} → {new} (для новых сообщений). Изменил: {actor}"
+    return f"🔁 Ответственный по сообщению: {old} → {new}. Изменил: {actor}"
+
+
 def backoff_seconds(
     attempt: int, settings: CelerySettings, retry_after: float | None = None
 ) -> float:

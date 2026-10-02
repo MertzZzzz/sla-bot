@@ -47,6 +47,7 @@ class ReplyEventType(StrEnum):
     OVERDUE = "overdue"
     NOT_REQUIRED = "not_required"
     CANCELLED = "cancelled"
+    REASSIGNED = "reassigned"
 
 
 class OutboxStatus(StrEnum):

@@ -20,7 +20,7 @@ from aiogram.exceptions import (
     TelegramUnauthorizedError,
 )
 
-from app.bot.keyboards.pending_reply import not_required_keyboard
+from app.bot.keyboards.pending_reply import notification_keyboard
 from app.core.config import TelegramSettings
 from app.services.telegram_sender import (
     DeliveryError,
@@ -75,7 +75,7 @@ class AiogramNotificationSender:
                 chat_id=chat_id,
                 message_thread_id=thread_id,
                 text=text,
-                reply_markup=not_required_keyboard(pending_reply_id),
+                reply_markup=notification_keyboard(pending_reply_id),
             )
         except (TelegramAPIError, TelegramNetworkError) as exc:
             raise map_telegram_error(exc) from exc

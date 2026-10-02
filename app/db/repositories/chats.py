@@ -25,8 +25,8 @@ class MonitoredChatRepository:
         chat: MonitoredChat | None = await self._session.scalar(stmt)
         return chat
 
-    async def get(self, chat_id: int) -> MonitoredChat | None:
-        return await self._session.get(MonitoredChat, chat_id)
+    async def get(self, chat_id: int, *, for_update: bool = False) -> MonitoredChat | None:
+        return await self._session.get(MonitoredChat, chat_id, with_for_update=for_update)
 
     async def create_if_absent(self, data: MonitoredChatCreate) -> MonitoredChat | None:
         """Insert a chat; returns ``None`` when it is already monitored."""
@@ -75,6 +75,18 @@ class ResponderRepository:
         await self._session.delete(row)
         await self._session.flush()
         return True
+
+    async def get_responder(self, chat_id: int, telegram_user_id: int) -> TelegramUser | None:
+        stmt = (
+            select(TelegramUser)
+            .join(ChatResponder, ChatResponder.user_id == TelegramUser.id)
+            .where(
+                ChatResponder.chat_id == chat_id,
+                TelegramUser.telegram_user_id == telegram_user_id,
+            )
+        )
+        user: TelegramUser | None = await self._session.scalar(stmt)
+        return user
 
     async def list_users(self, chat_id: int) -> list[TelegramUser]:
         stmt = (

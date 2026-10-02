@@ -10,7 +10,10 @@ from app.services.notifications import (
     NotificationConfigError,
     backoff_seconds,
     not_required_line,
+    reassigned_line,
     render_notification,
+    replace_responsible_line,
+    responsible_label,
 )
 from tests.factories import T0, payload
 
@@ -81,3 +84,16 @@ def test_backoff_is_exponential_and_capped() -> None:
     settings = CelerySettings(retry_backoff_base_seconds=5, retry_backoff_max_seconds=60)
     assert [backoff_seconds(a, settings) for a in (1, 2, 3, 4, 5)] == [5, 10, 20, 40, 60]
     assert backoff_seconds(1, settings, retry_after=30) == 30
+
+
+def test_replace_responsible_line_and_reassigned_line() -> None:
+    text = render_notification(payload(), T0).text
+    updated = replace_responsible_line(text, 4000, "<Пётр>")
+    assert 'Ответственный: <a href="tg://user?id=4000">&lt;Пётр&gt;</a>' in updated
+    assert "tg://user?id=2000" not in updated
+    assert updated.count("\n") == text.count("\n")
+    assert reassigned_line(chat_scope=False, old="A", new="B", actor="C") == (
+        "🔁 Ответственный по сообщению: A → B. Изменил: C"
+    )
+    assert "для новых сообщений" in reassigned_line(chat_scope=True, old="A", new="B", actor="C")
+    assert responsible_label(None, None) == "не назначен"
