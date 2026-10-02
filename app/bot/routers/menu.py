@@ -34,6 +34,7 @@ from app.bot.user_input import (
     USAGE,
     UserInputError,
     from_read,
+    pick_chat_keyboard,
     pick_user_keyboard,
     resolve_people,
     resolve_user,
@@ -384,8 +385,28 @@ SUBMENUS: dict[A, Callable[[MonitoredChatDetails], Screen]] = {
     A.SLA: lambda d: menus.sla_screen(d.chat),
     A.MODE: lambda d: menus.mode_screen(d.chat),
     A.TIMEZONE: lambda d: menus.timezone_screen(d.chat),
-    A.NOTIFICATIONS: lambda d: menus.notifications_screen(d.chat),
 }
+
+
+@on(A.NOTIFICATIONS)
+async def notifications(ctx: Ctx) -> Screen:
+    details = await _card(ctx)
+    if details is None:
+        return await chats_list(ctx)
+    return menus.notifications_screen(details.chat, private=ctx.message.chat.type == "private")
+
+
+@on(A.NOTIFICATIONS_PICK)
+async def notifications_pick(ctx: Ctx) -> Screen:
+    await ctx.message.answer("👇 Выбор группы", reply_markup=pick_chat_keyboard())
+    return await _prompt(
+        ctx,
+        MenuInput.notification,
+        "🔔 <b>Чат уведомлений</b>\n\nНажмите «👥 Выбрать группу» внизу экрана и выберите "
+        "группу, где уже есть бот. Или введите chat_id вручную.",
+        cancel_to=A.NOTIFICATIONS,
+        reply_kb=True,
+    )
 
 
 @on(*SUBMENUS)
@@ -704,7 +725,10 @@ async def input_notification(
     message: Message, state: FSMContext, services: BotServices, bot: Bot
 ) -> None:
     try:
-        value = SetNotificationCommand.parse(message.text)
+        if message.chat_shared is not None:  # Telegram's native chat picker
+            value = SetNotificationCommand(notification_chat_id=message.chat_shared.chat_id)
+        else:
+            value = SetNotificationCommand.parse(message.text)
     except CommandArgumentError as exc:
         await message.reply(str(exc))
         return

@@ -11,6 +11,7 @@ from app.bot.extractors import user_data
 from app.bot.routers.customer_chat import GROUP_HINT
 from app.bot.services import BotServices
 from app.core.config import Settings
+from app.core.enums import ChatType
 from tests.factories import CHAT_ID
 from tests.integration.bot_harness import RecordingSession, feed, message, reset_fsm
 from tests.integration.helpers import ADMIN_CHAT_ID, ADMIN_ID
@@ -76,7 +77,8 @@ async def test_non_admin_and_other_commands_are_silently_ignored(
 ) -> None:
     await feed(bot, settings, services, message(GROUP, CUSTOMER, "/chat_add"))
     assert await services.chats.list_chats() == []
-    for text in ("/menu", "/start", "/help", "/stats", "/chat_sla 60", "/cancel"):
+    await services.chats.add_chat(CHAT_ID, "ООО Заказчик", ChatType.SUPERGROUP, ADMIN_ID)
+    for text in ("/menu", "/start", "/help", "/stats", "/chat_sla 60", "/cancel", "/notify_here"):
         await feed(bot, settings, services, message(GROUP, ADMIN_TG, text))
     assert tg.of(SendMessage) == []
     assert tg.of(EditMessageText) == []

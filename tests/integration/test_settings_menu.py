@@ -143,10 +143,12 @@ async def test_menu_works_in_admin_chat_only(nav: Nav, tg: RecordingSession) -> 
     admin_chat = Nav(nav.bot, tg, nav.settings, nav.services, ADMIN_CHAT)
     await admin_chat.send("/menu")
     assert "💬 Чаты" in admin_chat.buttons()
-    sent = len(tg.of(SendMessage))
     other = Nav(nav.bot, tg, nav.settings, nav.services, Chat(id=-100123, type="supergroup"))
-    await other.send("/menu")
-    assert len(tg.of(SendMessage)) == sent
+    await other.send("/menu")  # unknown group: a hint instead of silence, no menu
+    assert other.text.startswith("Меню настроек в этой группе недоступно")
+    assert "/notify_here" in other.text
+    assert "<code>-100123</code>" in other.text
+    assert other.screen.reply_markup is None
 
 
 # --- chats --------------------------------------------------------------------------

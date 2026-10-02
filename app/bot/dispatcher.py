@@ -5,7 +5,7 @@ from aiogram.fsm.storage.base import BaseStorage
 from aiogram.fsm.storage.memory import MemoryStorage
 
 from app.bot.middlewares.logging import UpdateLoggingMiddleware
-from app.bot.routers import callbacks, customer_chat, menu, messages, stats
+from app.bot.routers import callbacks, customer_chat, menu, messages, notify_here, stats
 from app.bot.services import BotServices
 from app.core.config import Settings
 
@@ -20,6 +20,7 @@ def build_dispatcher(
     dp.include_routers(
         customer_chat.router,
         menu.router,
+        notify_here.router,
         stats.router,
         callbacks.router,
         messages.router,

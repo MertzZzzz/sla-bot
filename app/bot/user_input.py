@@ -8,6 +8,7 @@ from aiogram import Bot
 from aiogram.exceptions import TelegramAPIError
 from aiogram.types import (
     KeyboardButton,
+    KeyboardButtonRequestChat,
     KeyboardButtonRequestUsers,
     Message,
     MessageOriginHiddenUser,
@@ -45,6 +46,31 @@ def pick_user_keyboard(max_quantity: int = 1) -> ReplyKeyboardMarkup:
                         max_quantity=max_quantity,
                         request_name=True,
                         request_username=True,
+                    ),
+                )
+            ]
+        ],
+        resize_keyboard=True,
+        one_time_keyboard=True,
+    )
+
+
+PICK_CHAT_TEXT = "👥 Выбрать группу"
+PICK_CHAT_REQUEST_ID = 2
+
+
+def pick_chat_keyboard() -> ReplyKeyboardMarkup:
+    """Native Telegram group picker (private chat only): the bot gets the exact chat ID."""
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [
+                KeyboardButton(
+                    text=PICK_CHAT_TEXT,
+                    request_chat=KeyboardButtonRequestChat(
+                        request_id=PICK_CHAT_REQUEST_ID,
+                        chat_is_channel=False,
+                        bot_is_member=True,
+                        request_title=True,
                     ),
                 )
             ]

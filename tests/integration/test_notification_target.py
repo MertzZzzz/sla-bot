@@ -6,6 +6,8 @@ from collections.abc import Callable
 
 import pytest
 from aiogram import Bot
+from aiogram.methods import AnswerCallbackQuery, SendMessage
+from aiogram.types import Chat, ChatShared, ReplyKeyboardMarkup, User
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.bot.chat_target import candidates
@@ -18,7 +20,13 @@ from app.services.notifications import DeliveryStatus, NotificationService
 from app.services.sla import SlaService
 from app.services.telegram_sender import PermanentDeliveryError
 from tests.factories import CHAT_ID, FakeClock, incoming, user
-from tests.integration.bot_harness import RecordingSession, reset_fsm, visible_chat
+from tests.integration.bot_harness import (
+    RecordingSession,
+    callback,
+    feed,
+    reset_fsm,
+    visible_chat,
+)
 from tests.integration.helpers import ADMIN_ID, CLIENT, FakeSender, outbox
 from tests.integration.test_settings_menu import Nav
 
@@ -166,3 +174,60 @@ async def test_answered_ticket_is_not_requeued(
         CHAT_ID, MonitoredChatUpdate(notification_chat_id=-5424221725), ADMIN_ID
     )
     assert outbox(sync_factory)[0].status is OutboxStatus.FAILED
+
+
+SERVICE_GROUP = Chat(id=-1005424221725, type="supergroup", title="Служебная", is_forum=True)
+
+
+async def test_notify_here_in_any_group_and_topic(
+    bot: Bot, tg: RecordingSession, settings: Settings, services: BotServices, chat: None
+) -> None:
+    topic = Nav(
+        bot, tg, settings, services, SERVICE_GROUP, message_thread_id=9, is_topic_message=True
+    )
+    await topic.send("/notify_here", message_thread_id=9, is_topic_message=True)
+    assert "направлять в этот топик" in topic.text
+    await topic.press("ООО Заказчик")
+    assert await target(services) == (-1005424221725, 9)
+    assert "будут приходить сюда (в этот топик)" in topic.text
+
+    plain = Nav(bot, tg, settings, services, SERVICE_GROUP)
+    await plain.send("/notify_here")
+    assert "✓ ООО Заказчик" not in plain.buttons()  # target is the topic, not the group
+    await plain.press("ООО Заказчик")
+    assert await target(services) == (-1005424221725, None)
+
+
+async def test_notify_here_admin_only(
+    bot: Bot, tg: RecordingSession, settings: Settings, services: BotServices, chat: None
+) -> None:
+    admin = Nav(bot, tg, settings, services, SERVICE_GROUP)
+    await admin.send("/notify_here")
+    stranger = Nav(
+        bot, tg, settings, services, SERVICE_GROUP, User(id=9999, is_bot=False, first_name="S")
+    )
+    sent = len(tg.requests)
+    await stranger.send("/notify_here")
+    assert all(not isinstance(r, SendMessage) for r in tg.requests[sent:])
+    update = callback(SERVICE_GROUP, stranger.sender, admin.buttons()["ООО Заказчик"])
+    await feed(bot, settings, services, update)
+    assert tg.of(AnswerCallbackQuery)[-1].show_alert
+    assert await target(services) == (None, None)
+
+
+async def test_pick_group_with_native_picker(
+    nav: Nav, tg: RecordingSession, services: BotServices, chat: None
+) -> None:
+    tg.chats[-1005424221725] = visible_chat(-1005424221725, "Служебная")
+    await nav.send("/menu")
+    await nav.press("Чаты")
+    await nav.press("ООО Заказчик")
+    await nav.press("Уведомления")
+    await nav.press("Выбрать группу")
+    picker = [m for m in tg.of(SendMessage) if isinstance(m.reply_markup, ReplyKeyboardMarkup)]
+    assert picker[-1].reply_markup.keyboard[0][0].request_chat.bot_is_member
+    await nav.send(
+        None, chat_shared=ChatShared(request_id=2, chat_id=-1005424221725, title="Служебная")
+    )
+    assert await target(services) == (-1005424221725, None)
+    assert "✅ Чат уведомлений: «Служебная»" in nav.text

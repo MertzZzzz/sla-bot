@@ -442,11 +442,14 @@ def responders_screen(details: MonitoredChatDetails, page: int) -> Screen:
     )
 
 
-def notifications_screen(chat: MonitoredChatRead) -> Screen:
-    rows = [
-        [button("📍 Отправлять сюда", A.NOTIFICATIONS_HERE, chat.id)],
-        [button("✏️ Указать chat_id вручную", A.NOTIFICATIONS_INPUT, chat.id)],
-    ]
+def notifications_screen(chat: MonitoredChatRead, *, private: bool = False) -> Screen:
+    rows = []
+    if private:
+        rows.append([button("👥 Выбрать группу", A.NOTIFICATIONS_PICK, chat.id)])
+        rows.append([button("📍 Отправлять мне в личку", A.NOTIFICATIONS_HERE, chat.id)])
+    else:
+        rows.append([button("📍 Отправлять сюда", A.NOTIFICATIONS_HERE, chat.id)])
+    rows.append([button("✏️ Указать chat_id вручную", A.NOTIFICATIONS_INPUT, chat.id)])
     if chat.notification_chat_id:
         rows.append([button("✖ Отключить уведомления", A.NOTIFICATIONS_CLEAR, chat.id)])
     return Screen(
@@ -456,8 +459,11 @@ def notifications_screen(chat: MonitoredChatRead) -> Screen:
                 "",
                 *_notification_lines(chat),
                 "",
-                "«Отправлять сюда» — в текущий чат (и текущий топик, если меню открыто в топике). "
-                "Бот должен быть участником чата уведомлений и иметь право писать.",
+                "Как направить уведомления в группу:",
+                "• «👥 Выбрать группу» (в личке с ботом) — выбрать группу из списка Telegram;",
+                "• или написать <code>/notify_here</code> прямо в нужной группе или топике и "
+                "выбрать этот чат — так можно указать и топик.",
+                "Бот должен быть участником группы и иметь право писать.",
             ]
         ),
         keyboard(*rows, back_to_chat(chat.id)),

@@ -74,6 +74,7 @@ class MenuAction(StrEnum):
     RESPONDER_INPUT = "di"
     NOTIFICATIONS = "nm"
     NOTIFICATIONS_HERE = "nh"
+    NOTIFICATIONS_PICK = "ng"
     NOTIFICATIONS_INPUT = "ni"
     NOTIFICATIONS_CLEAR = "nx"
     OPEN_TICKETS = "op"
@@ -90,3 +91,9 @@ class MenuCallbackData(CallbackData, prefix="m"):
     i: int = 0
     v: str = ""
     p: int = 0
+
+
+class NotifyHereCallbackData(CallbackData, prefix="nt"):
+    """/notify_here in a group: route notifications of monitored chat ``chat`` here."""
+
+    chat: int
