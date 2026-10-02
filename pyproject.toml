@@ -7,6 +7,7 @@ requires-python = ">=3.12"
 dependencies = [
     "aiogram>=3.13,<4",
     "aiohttp>=3.9",
+    "aiohttp-socks>=0.8",  # SOCKS/HTTP proxy support for the Telegram client
     "pydantic>=2.7,<3",
     "pydantic-settings>=2.3,<3",
     "sqlalchemy[asyncio]>=2.0.30,<2.1",

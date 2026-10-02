@@ -172,6 +172,32 @@ celery -A app.workers.celery_app:celery_app beat -l INFO
   `WEBHOOK_PATH` на `bot:8080`; для этого измените публикацию порта
   (`BOT_HTTP_PUBLISH=0.0.0.0:8080`) или подключите прокси к сети compose.
 
+### Прокси для Telegram (SOCKS / HTTP)
+
+Все запросы к Telegram Bot API — и бота (polling, ответы, кнопки), и Celery-воркера
+(отправка уведомлений) — можно пустить через прокси:
+
+```dotenv
+APP_TELEGRAM__PROXY_URL=socks5://10.0.0.5:1080        # или socks4://…, http://proxy:3128
+# логин/пароль — прямо в URL (percent-encoded): socks5://user:p%40ss@10.0.0.5:1080
+# или отдельными переменными (спецсимволы экранируются автоматически):
+APP_TELEGRAM__PROXY_USERNAME=user
+APP_TELEGRAM__PROXY_PASSWORD=p@ss
+```
+
+- Схемы: `http` (через `CONNECT`), `socks4`, `socks5`; `socks5h` и `socks4a` принимаются как
+  синонимы. DNS-имя `api.telegram.org` всегда разрешается на стороне прокси.
+  HTTPS-прокси (`https://`) не поддерживается.
+- Неверный URL (нет порта, неизвестная схема, путь) — ошибка при старте с понятным сообщением.
+- Пароль не попадает в логи: при старте пишется только `telegram api proxy: socks5://host:port`.
+- Недоступный прокси при отправке уведомления — временная ошибка: событие уходит на повтор с
+  backoff, как при обычной сетевой ошибке.
+- Через прокси идут только запросы к Telegram; PostgreSQL и Redis подключаются напрямую.
+  Входящий webhook прокси не касается.
+- В Docker адрес прокси должен быть доступен из контейнера: не `127.0.0.1` хоста, а, например,
+  `host.docker.internal` (с `extra_hosts: ["host.docker.internal:host-gateway"]`) или имя
+  сервиса в сети compose.
+
 ## Настройка бота в Telegram
 
 1. Создайте бота у [@BotFather](https://t.me/BotFather), получите токен.
@@ -304,6 +330,8 @@ celery -A app.workers.celery_app:celery_app beat -l INFO
 | `APP_TELEGRAM__BOT_TOKEN` | — (обязательно) | токен бота |
 | `APP_TELEGRAM__ADMIN_TELEGRAM_IDS` | пусто | ID глобальных админов через запятую |
 | `APP_TELEGRAM__WEBHOOK_*` | выкл. | см. «Polling и webhook» |
+| `APP_TELEGRAM__PROXY_URL` | нет | прокси для Telegram API: `http://`, `socks4://`, `socks5://` |
+| `APP_TELEGRAM__PROXY_USERNAME` / `_PASSWORD` | нет | учётные данные прокси (альтернатива логину в URL) |
 | `APP_DATABASE__HOST/PORT/NAME/USER/PASSWORD` | `postgres/5432/telegram_sla_bot/telegram_sla_bot/—` | PostgreSQL |
 | `APP_REDIS__HOST/PORT/PASSWORD` | `redis/6379/—` | Redis (брокер) |
 | `APP_APP__DEFAULT_SLA_SECONDS` | `900` | SLA для новых чатов |

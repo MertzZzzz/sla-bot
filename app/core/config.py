@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 from typing import Annotated, Literal
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit
 
 from pydantic import (
     BaseModel,
@@ -39,6 +39,38 @@ class AppSettings(BaseModel):
     http_port: int = Field(default=8080, gt=0, lt=65536)
 
 
+# Proxy schemes accepted by aiohttp-socks; aliases are normalised. DNS is always
+# resolved by the proxy (remote DNS), so socks5h/socks4a behave like socks5/socks4.
+PROXY_SCHEMES: dict[str, str] = {
+    "http": "http",
+    "socks4": "socks4",
+    "socks4a": "socks4",
+    "socks5": "socks5",
+    "socks5h": "socks5",
+}
+
+
+def normalize_proxy_url(raw: str) -> str:
+    try:
+        parts = urlsplit(raw.strip())
+        port = parts.port
+    except ValueError as exc:
+        msg = "Invalid proxy URL"
+        raise ValueError(msg) from exc
+    scheme = PROXY_SCHEMES.get(parts.scheme.lower())
+    if scheme is None:
+        allowed = ", ".join(PROXY_SCHEMES)
+        msg = f"Unsupported proxy scheme {parts.scheme!r}; use one of: {allowed}"
+        raise ValueError(msg)
+    if not parts.hostname or port is None:
+        msg = "Proxy URL must contain host and port, e.g. socks5://127.0.0.1:1080"
+        raise ValueError(msg)
+    if parts.path not in ("", "/") or parts.query or parts.fragment:
+        msg = "Proxy URL must not contain a path or query"
+        raise ValueError(msg)
+    return parts._replace(scheme=scheme, path="").geturl()
+
+
 class TelegramSettings(BaseModel):
     bot_token: SecretStr
     admin_telegram_ids: Annotated[frozenset[int], NoDecode] = frozenset()
@@ -47,6 +79,33 @@ class TelegramSettings(BaseModel):
     webhook_path: str = "/telegram/webhook"
     webhook_secret_token: SecretStr | None = None
     request_timeout_seconds: float = Field(default=15.0, gt=0)
+    # Proxy for all Telegram Bot API calls (bot and Celery worker), e.g.
+    # socks5://user:pass@10.0.0.1:1080 or http://proxy.local:3128. Credentials may be
+    # given in the URL (percent-encoded) or via proxy_username/proxy_password.
+    proxy_url: SecretStr | None = None
+    proxy_username: str | None = None
+    proxy_password: SecretStr | None = None
+
+    @field_validator("proxy_url", mode="before")
+    @classmethod
+    def parse_proxy_url(cls, value: object) -> object:
+        raw = value.get_secret_value() if isinstance(value, SecretStr) else value
+        if raw is None or (isinstance(raw, str) and not raw.strip()):
+            return None
+        if not isinstance(raw, str):
+            return value
+        return SecretStr(normalize_proxy_url(raw))
+
+    @field_validator("proxy_username", mode="before")
+    @classmethod
+    def empty_username_is_none(cls, value: object) -> object:
+        return None if isinstance(value, str) and not value.strip() else value
+
+    @field_validator("proxy_password", mode="before")
+    @classmethod
+    def empty_password_is_none(cls, value: object) -> object:
+        raw = value.get_secret_value() if isinstance(value, SecretStr) else value
+        return None if isinstance(raw, str) and not raw else value
 
     @field_validator("admin_telegram_ids", mode="before")
     @classmethod
@@ -73,6 +132,25 @@ class TelegramSettings(BaseModel):
     @classmethod
     def path_starts_with_slash(cls, value: str) -> str:
         return value if value.startswith("/") else f"/{value}"
+
+    @model_validator(mode="after")
+    def check_proxy(self) -> TelegramSettings:
+        has_credentials = self.proxy_username is not None or self.proxy_password is not None
+        if has_credentials and self.proxy_url is None:
+            msg = "APP_TELEGRAM__PROXY_USERNAME/PASSWORD require APP_TELEGRAM__PROXY_URL"
+            raise ValueError(msg)
+        if (self.proxy_username is None) != (self.proxy_password is None):
+            msg = "Set both APP_TELEGRAM__PROXY_USERNAME and APP_TELEGRAM__PROXY_PASSWORD"
+            raise ValueError(msg)
+        return self
+
+    @property
+    def proxy_display(self) -> str | None:
+        """Proxy address safe for logs (no credentials)."""
+        if self.proxy_url is None:
+            return None
+        parts = urlsplit(self.proxy_url.get_secret_value())
+        return f"{parts.scheme}://{parts.hostname}:{parts.port}"
 
     @model_validator(mode="after")
     def check_webhook(self) -> TelegramSettings:

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from functools import lru_cache
 
@@ -13,6 +14,8 @@ from app.services.clock import SystemClock
 from app.services.notifications import NotificationService
 from app.services.sla import SlaService
 
+logger = logging.getLogger(__name__)
+
 
 @dataclass(frozen=True, slots=True)
 class WorkerContext:
@@ -23,6 +26,11 @@ class WorkerContext:
 @lru_cache(maxsize=1)
 def get_worker_context() -> WorkerContext:
     settings = get_settings()
+    if settings.telegram.proxy_display:
+        logger.info(
+            f"telegram api proxy: {settings.telegram.proxy_display}",
+            extra={"event": "telegram_proxy_enabled"},
+        )
     session_factory = build_sync_sessionmaker(build_sync_engine(settings.database))
 
     def uow_factory() -> SyncUnitOfWork:

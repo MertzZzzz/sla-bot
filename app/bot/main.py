@@ -84,6 +84,11 @@ async def main() -> None:
     app = web.Application()
     setup_health(app, engine, redis)
     mode = "webhook" if settings.telegram.webhook_enabled else "polling"
+    if settings.telegram.proxy_display:
+        logger.info(
+            f"telegram api proxy: {settings.telegram.proxy_display}",
+            extra={"event": "telegram_proxy_enabled"},
+        )
     logger.info("bot starting", extra={"event": f"bot_start_{mode}"})
     try:
         if settings.telegram.webhook_enabled:

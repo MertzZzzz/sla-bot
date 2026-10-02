@@ -87,3 +87,75 @@ def test_timezone_validation() -> None:
     )
     with pytest.raises(ValidationError):
         AppSettings(default_timezone="Mars/Olympus")
+
+
+@pytest.mark.parametrize(
+    ("raw", "normalized"),
+    [
+        ("socks5://127.0.0.1:1080", "socks5://127.0.0.1:1080"),
+        ("SOCKS5H://proxy.local:1080", "socks5://proxy.local:1080"),
+        ("socks4a://10.0.0.1:1080/", "socks4://10.0.0.1:1080"),
+        ("http://proxy.local:3128", "http://proxy.local:3128"),
+        ("socks5://user:p%40ss@10.0.0.1:1080", "socks5://user:p%40ss@10.0.0.1:1080"),
+    ],
+)
+def test_proxy_url_normalization(raw: str, normalized: str) -> None:
+    settings = make_settings(proxy_url=raw)
+    assert settings.telegram.proxy_url is not None
+    assert settings.telegram.proxy_url.get_secret_value() == normalized
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        "ftp://proxy:21",
+        "https://proxy:443",
+        "socks5://proxy",
+        "socks5://:1080",
+        "socks5://proxy:notaport",
+        "http://proxy:3128/path",
+        "proxy:1080",
+    ],
+)
+def test_proxy_url_invalid(raw: str) -> None:
+    with pytest.raises(ValidationError, match=r"[Pp]roxy"):
+        make_settings(proxy_url=raw)
+
+
+def test_proxy_disabled_by_default_and_empty_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    assert make_settings().telegram.proxy_url is None
+    monkeypatch.setenv("APP_TELEGRAM__BOT_TOKEN", "1:secret")
+    monkeypatch.setenv("APP_TELEGRAM__PROXY_URL", "")
+    monkeypatch.setenv("APP_TELEGRAM__PROXY_USERNAME", "")
+    monkeypatch.setenv("APP_TELEGRAM__PROXY_PASSWORD", "")
+    settings = Settings(_env_file=None)
+    assert settings.telegram.proxy_url is None
+    assert settings.telegram.proxy_username is None
+
+
+def test_proxy_from_env_with_separate_credentials(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("APP_TELEGRAM__BOT_TOKEN", "1:secret")
+    monkeypatch.setenv("APP_TELEGRAM__PROXY_URL", "socks5://10.0.0.1:1080")
+    monkeypatch.setenv("APP_TELEGRAM__PROXY_USERNAME", "bot")
+    monkeypatch.setenv("APP_TELEGRAM__PROXY_PASSWORD", "s3cr:et@")
+    tg = Settings(_env_file=None).telegram
+    assert tg.proxy_username == "bot"
+    assert tg.proxy_password is not None
+    assert tg.proxy_password.get_secret_value() == "s3cr:et@"
+
+
+def test_proxy_credentials_validation() -> None:
+    with pytest.raises(ValidationError, match="require APP_TELEGRAM__PROXY_URL"):
+        make_settings(proxy_username="u", proxy_password="p")
+    with pytest.raises(ValidationError, match="both"):
+        make_settings(proxy_url="socks5://h:1", proxy_username="u")
+
+
+def test_proxy_secrets_hidden() -> None:
+    settings = make_settings(
+        proxy_url="socks5://user:url-secret@10.0.0.1:1080", proxy_password="pw", proxy_username="u"
+    )
+    dumped = repr(settings) + str(settings.model_dump())
+    assert "url-secret" not in dumped
+    assert "'pw'" not in dumped
+    assert settings.telegram.proxy_display == "socks5://10.0.0.1:1080"
