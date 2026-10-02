@@ -100,6 +100,10 @@ class SlaService:
             deadline_at=ticket.deadline_at,
             message_link=ticket.source_message_link,
             timezone=chat.timezone,
+            message_count=ticket.message_count,
+            last_message_text=ticket.last_message_text,
+            last_content_type=ticket.last_content_type,
+            last_message_date=ticket.last_message_at,
         )
 
     def deliverable_event_ids(self) -> list[int]:

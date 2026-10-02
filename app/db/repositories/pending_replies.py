@@ -3,13 +3,13 @@ from __future__ import annotations
 from collections.abc import Sequence
 from datetime import datetime
 
-from sqlalchemy import Select, func, select
+from sqlalchemy import Select, func, select, text
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
 from app.core.enums import PendingReplyStatus
-from app.db.models import PendingReply
+from app.db.models import PendingReply, PendingReplyMessage
 from app.schemas.pending_replies import PendingReplyCreate
 from app.services.reply_matching import MatchCriteria, MatchKind
 
@@ -32,7 +32,15 @@ def answer_candidate_stmt(
         PendingReply.source_message_id < response_message_id,
     )
     if criteria.kind is MatchKind.EXACT_SOURCE:
-        stmt = stmt.where(PendingReply.source_message_id == criteria.source_message_id)
+        # A reply to *any* message of the ticket (first or merged) matches it.
+        stmt = stmt.where(
+            PendingReply.id.in_(
+                select(PendingReplyMessage.pending_reply_id).where(
+                    PendingReplyMessage.chat_id == chat_id,
+                    PendingReplyMessage.message_id == criteria.source_message_id,
+                )
+            )
+        )
     elif criteria.kind is MatchKind.OLDEST_IN_THREAD:
         if criteria.thread_id is None:
             stmt = stmt.where(PendingReply.source_thread_id.is_(None))
@@ -55,6 +63,65 @@ class PendingReplyRepository:
         )
         ticket_id: int | None = await self._session.scalar(stmt)
         return ticket_id
+
+    async def add_message(
+        self, chat_id: int, pending_reply_id: int, message_id: int, message_date: datetime
+    ) -> bool:
+        """Link a Telegram message to a ticket; ``False`` if it was already linked."""
+        stmt = (
+            insert(PendingReplyMessage)
+            .values(
+                chat_id=chat_id,
+                message_id=message_id,
+                pending_reply_id=pending_reply_id,
+                message_date=message_date,
+            )
+            .on_conflict_do_nothing()
+            .returning(PendingReplyMessage.message_id)
+        )
+        return (await self._session.scalar(stmt)) is not None
+
+    async def message_tracked(self, chat_id: int, message_id: int) -> bool:
+        stmt = select(PendingReplyMessage.pending_reply_id).where(
+            PendingReplyMessage.chat_id == chat_id, PendingReplyMessage.message_id == message_id
+        )
+        return (await self._session.scalar(stmt)) is not None
+
+    async def lock_author(self, chat_id: int, author_telegram_id: int) -> None:
+        """Serialize ticket creation per (chat, author) until the transaction ends.
+
+        Without it two messages of one author processed concurrently could both see
+        "no open ticket" and open two tickets instead of one.
+        """
+        await self._session.execute(
+            text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
+            {"key": f"pending_reply:{chat_id}:{author_telegram_id}"},
+        )
+
+    async def find_open_by_author(
+        self, chat_id: int, author_telegram_id: int, thread_id: int | None
+    ) -> PendingReply | None:
+        """The author's latest open ticket in the same chat and topic (row locked)."""
+        thread = (
+            PendingReply.source_thread_id.is_(None)
+            if thread_id is None
+            else PendingReply.source_thread_id == thread_id
+        )
+        stmt = (
+            select(PendingReply)
+            .where(
+                PendingReply.chat_id == chat_id,
+                PendingReply.source_author_telegram_id == author_telegram_id,
+                PendingReply.status.in_(OPEN_STATUSES),
+                thread,
+            )
+            .order_by(PendingReply.source_message_id.desc())
+            .limit(1)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        ticket: PendingReply | None = await self._session.scalar(stmt)
+        return ticket
 
     async def find_for_answer(
         self, chat_id: int, criteria: MatchCriteria, response_message_id: int

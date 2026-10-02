@@ -128,7 +128,7 @@ async def test_admin_changes_chat_responsible_for_new_messages(
         ticket_id, CHAT, COLLEAGUE.telegram_user_id, ADMIN, is_admin=True
     )
     assert result.outcome is ReassignOutcome.OK
-    await services.messages.process(incoming(12, CLIENT, date=clock.now()))
+    await services.messages.process(incoming(12, user(3001), date=clock.now()))
     old, new = tickets(sync_factory)
     assert old.responsible_telegram_id_snapshot == RESPONDER.telegram_user_id  # snapshot kept
     assert new.responsible_telegram_id_snapshot == COLLEAGUE.telegram_user_id

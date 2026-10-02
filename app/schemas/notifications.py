@@ -30,6 +30,11 @@ class NotificationPayload(Schema):
     deadline_at: datetime
     message_link: str | None
     timezone: str
+    # Follow-up messages merged into the ticket (defaults keep old payloads valid).
+    message_count: int = 1
+    last_message_text: str | None = None
+    last_content_type: str | None = None
+    last_message_date: datetime | None = None
 
 
 class RenderedNotification(Schema):

@@ -62,6 +62,14 @@ def render_notification(payload: NotificationPayload, now: datetime) -> Rendered
         if payload.responsible_telegram_id
         else "не назначен"
     )
+    merged = payload.message_count > 1
+    count_line = []
+    if merged:
+        last = payload.last_message_date or payload.source_message_date
+        count_line = [
+            f"Сообщений: {payload.message_count} (последнее "
+            f"{format_datetime(last, payload.timezone)})"
+        ]
     head = "\n".join(
         [
             "🔴 <b>SLA нарушен</b>",
@@ -74,6 +82,7 @@ def render_notification(payload: NotificationPayload, now: datetime) -> Rendered
             f"Сообщение от: {escape_truncated(payload.author_name, 256)}",
             f"Получено: {format_datetime(payload.source_message_date, payload.timezone)}"
             f" ({escape(payload.timezone)})",
+            *count_line,
             f"Просрочка: {format_duration((now - payload.deadline_at).total_seconds())}",
         ]
     )
@@ -82,9 +91,17 @@ def render_notification(payload: NotificationPayload, now: datetime) -> Rendered
         if payload.message_link
         else ""
     )
-    budget = min(SOURCE_PREVIEW_LIMIT, TELEGRAM_MESSAGE_LIMIT - len(head) - len(tail) - 200)
-    preview = content_preview(payload.source_text, payload.source_content_type, max(budget, 100))
-    text = f"{head}\n\nТекст: {preview}{tail}"
+    budget = max(
+        min(SOURCE_PREVIEW_LIMIT, TELEGRAM_MESSAGE_LIMIT - len(head) - len(tail) - 200), 100
+    )
+    if merged:
+        budget //= 2
+    preview = content_preview(payload.source_text, payload.source_content_type, budget)
+    body = f"Текст: {preview}"
+    if merged:
+        last_preview = content_preview(payload.last_message_text, payload.last_content_type, budget)
+        body += f"\nПоследнее: {last_preview}"
+    text = f"{head}\n\n{body}{tail}"
     return RenderedNotification(
         text=text, target_chat_id=payload.target_chat_id, target_thread_id=payload.target_thread_id
     )

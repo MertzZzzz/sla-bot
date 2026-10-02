@@ -97,3 +97,20 @@ def test_replace_responsible_line_and_reassigned_line() -> None:
     )
     assert "для новых сообщений" in reassigned_line(chat_scope=True, old="A", new="B", actor="C")
     assert responsible_label(None, None) == "не назначен"
+
+
+def test_render_merged_messages() -> None:
+    p = payload(
+        message_count=3,
+        last_message_text="<ещё>",
+        last_content_type="text",
+        last_message_date=T0 + timedelta(minutes=4),
+    )
+    text = render_notification(p, T0 + timedelta(minutes=20)).text
+    assert "Сообщений: 3 (последнее 15.01.2026 12:04:00)" in text
+    assert "Текст: Где мой заказ?\nПоследнее: &lt;ещё&gt;" in text
+    single = render_notification(payload(), T0).text
+    assert "Сообщений:" not in single
+    assert "Последнее:" not in single
+    huge = payload(message_count=2, source_text="&" * 5000, last_message_text="<" * 5000)
+    assert len(render_notification(huge, T0).text) <= TELEGRAM_MESSAGE_LIMIT

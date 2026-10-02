@@ -163,7 +163,7 @@ async def test_settings_change_does_not_rewrite_existing_ticket(
         CHAT_ID, MonitoredChatUpdate(sla_seconds=60, priority=Priority.P1), ADMIN_ID
     )
     await services.chats.set_responsible(CHAT_ID, user(4000), ADMIN_ID)
-    await services.messages.process(incoming(11, CLIENT))
+    await services.messages.process(incoming(11, user(3001)))
     old, new = tickets(sync_factory)
     assert (old.sla_seconds_snapshot, old.priority_snapshot) == (900, Priority.P3)
     assert old.responsible_telegram_id_snapshot == RESPONDER.telegram_user_id

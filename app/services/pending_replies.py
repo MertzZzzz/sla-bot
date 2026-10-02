@@ -52,11 +52,13 @@ class PendingReplyService:
         links: MessageLinkService,
         *,
         responsible_can_mark_not_required: bool,
+        merge_consecutive_messages: bool = True,
     ) -> None:
         self._uow_factory = uow_factory
         self._clock = clock
         self._links = links
         self._responsible_can_mark = responsible_can_mark_not_required
+        self._merge_consecutive = merge_consecutive_messages
 
     async def create_in(
         self,
@@ -66,6 +68,15 @@ class PendingReplyService:
         msg: IncomingMessage,
         now: datetime,
     ) -> MessageProcessingResult:
+        if await uow.pending.message_tracked(chat.id, msg.message_id):
+            return MessageProcessingResult(action="duplicate", reason="message already tracked")
+        if self._merge_consecutive:
+            await uow.pending.lock_author(chat.id, author.telegram_user_id)
+            open_ticket = await uow.pending.find_open_by_author(
+                chat.id, author.telegram_user_id, msg.message_thread_id
+            )
+            if open_ticket is not None and open_ticket.source_message_id < msg.message_id:
+                return await self._merge(uow, open_ticket, author, msg)
         # SLA starts when the message was sent (capped by "now" against clock skew), so
         # updates delivered late after an outage do not get a fresh SLA.
         created_at = min(msg.date, now)
@@ -99,6 +110,7 @@ class PendingReplyService:
             return MessageProcessingResult(
                 action="duplicate", reason="source message already tracked"
             )
+        await uow.pending.add_message(chat.id, ticket_id, msg.message_id, msg.date)
         await uow.audit.add_reply_event(
             ticket_id,
             ReplyEventType.CREATED,
@@ -107,6 +119,31 @@ class PendingReplyService:
             metadata={"deadline_at": data.deadline_at.isoformat(), "sla_seconds": chat.sla_seconds},
         )
         return MessageProcessingResult(action="created", pending_reply_id=ticket_id)
+
+    async def _merge(
+        self, uow: UnitOfWork, ticket: PendingReply, author: TelegramUser, msg: IncomingMessage
+    ) -> MessageProcessingResult:
+        """Attach a follow-up message to the author's open ticket.
+
+        The deadline stays anchored to the first message: the customer has been waiting
+        since then, and one answer closes the whole batch.
+        """
+        if not await uow.pending.add_message(ticket.chat_id, ticket.id, msg.message_id, msg.date):
+            return MessageProcessingResult(action="duplicate", reason="message already tracked")
+        ticket.message_count += 1
+        if ticket.last_message_id is None or msg.message_id > ticket.last_message_id:
+            ticket.last_message_id = msg.message_id
+            ticket.last_message_at = msg.date
+            ticket.last_message_text = (msg.text or None) and msg.text[:MAX_SOURCE_TEXT_LENGTH]
+            ticket.last_content_type = msg.content_type
+        await uow.audit.add_reply_event(
+            ticket.id,
+            ReplyEventType.MESSAGE_ADDED,
+            actor_telegram_user_id=author.telegram_user_id,
+            telegram_message_id=msg.message_id,
+            metadata={"message_count": ticket.message_count},
+        )
+        return MessageProcessingResult(action="merged", pending_reply_id=ticket.id)
 
     async def close_in(
         self,

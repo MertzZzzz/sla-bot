@@ -129,7 +129,9 @@ async def test_stats_for_period(
     clock.current = start
 
     async def ticket(msg_id: int) -> None:
-        await services.messages.process(incoming(msg_id, CLIENT, date=clock.now()))
+        # A different client each time: consecutive messages of one author would be
+        # merged into a single ticket.
+        await services.messages.process(incoming(msg_id, user(msg_id * 100), date=clock.now()))
 
     async def answer(msg_id: int) -> None:
         await services.messages.process(incoming(msg_id, RESPONDER, date=clock.now()))
@@ -175,7 +177,7 @@ async def test_stats_grouped_by_responsible_and_empty(
     await services.messages.process(incoming(10, CLIENT, date=clock.now()))
     await services.chats.set_responsible(CHAT_ID, user(4000, "New"), ADMIN_ID)
     await services.chats.update(CHAT_ID, MonitoredChatUpdate(priority=Priority.P1), ADMIN_ID)
-    await services.messages.process(incoming(11, CLIENT, date=clock.now()))
+    await services.messages.process(incoming(11, user(3001), date=clock.now()))
     rows = await services.stats.collect(StatsQuery(days=1))
     assert sorted((r.responsible_telegram_id, r.created) for r in rows) == [(2000, 1), (4000, 1)]
     assert all(r.priority is Priority.P1 for r in rows)

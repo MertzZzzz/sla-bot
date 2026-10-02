@@ -48,6 +48,7 @@ class ReplyEventType(StrEnum):
     NOT_REQUIRED = "not_required"
     CANCELLED = "cancelled"
     REASSIGNED = "reassigned"
+    MESSAGE_ADDED = "message_added"
 
 
 class OutboxStatus(StrEnum):

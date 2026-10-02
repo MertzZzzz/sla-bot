@@ -32,6 +32,9 @@ class AppSettings(BaseModel):
     default_reply_match_mode: ReplyMatchMode = ReplyMatchMode.ANY_RESPONDER_MESSAGE
     # Responsible users may press "Ответ не требуется" for their own chats.
     responsible_can_mark_not_required: bool = True
+    # Consecutive messages of one author (while their ticket is open, in the same topic)
+    # join that ticket instead of opening new ones: one answer closes them all.
+    merge_consecutive_messages: bool = True
     # Assigning a responsible also adds them to the chat responders.
     auto_add_responsible_as_responder: bool = True
     # One HTTP server serves /health/* and, in webhook mode, the Telegram webhook.

@@ -461,8 +461,9 @@ def open_tickets_screen(details: MonitoredChatDetails, tickets: list[PendingRepl
             truncate((t.source_text or t.source_content_type or "").replace("\n", " "), 60)
         )
         link = f' <a href="{escape(t.source_message_link)}">→</a>' if t.source_message_link else ""
+        more = f" (+{t.message_count - 1})" if t.message_count > 1 else ""
         line = (
-            f"{mark} {author}: {preview}{link}\n"
+            f"{mark} {author}{more}: {preview}{link}\n"
             f"    дедлайн {format_datetime(t.deadline_at, chat.timezone)}"
         )
         if len("\n".join([*lines, line])) > TELEGRAM_MESSAGE_LIMIT - 200:

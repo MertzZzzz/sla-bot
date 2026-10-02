@@ -62,6 +62,9 @@ class PendingReplyRead(Schema):
     priority_snapshot: Priority
     sla_seconds_snapshot: int
     responsible_telegram_id_snapshot: int | None
+    message_count: int = 1
+    last_message_at: datetime | None = None
+    last_message_text: str | None = None
     status: PendingReplyStatus
     overdue_at: datetime | None
     responded_at: datetime | None
@@ -85,6 +88,6 @@ class PendingReplyCloseRequest(Schema):
 
 
 class MessageProcessingResult(Schema):
-    action: str  # "ignored" | "created" | "duplicate" | "answered" | "no_match"
+    action: str  # ignored | created | merged | duplicate | answered | no_match
     pending_reply_id: int | None = None
     reason: str | None = None

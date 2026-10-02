@@ -71,6 +71,15 @@ class PendingReply(TimestampMixin, Base):
     source_content_type: Mapped[str | None] = mapped_column(String(32))
     source_message_date: Mapped[datetime] = mapped_column(nullable=False)
     source_message_link: Mapped[str | None] = mapped_column(String(256))
+    # Consecutive messages of the same author are merged into one ticket (one answer
+    # closes them all); ``source_*`` describe the first one, ``last_*`` the latest.
+    message_count: Mapped[int] = mapped_column(
+        Integer, default=1, server_default="1", nullable=False
+    )
+    last_message_id: Mapped[int | None] = mapped_column(BigInteger)
+    last_message_at: Mapped[datetime | None] = mapped_column()
+    last_message_text: Mapped[str | None] = mapped_column(Text)
+    last_content_type: Mapped[str | None] = mapped_column(String(32))
     deadline_at: Mapped[datetime] = mapped_column(nullable=False)
     # Snapshots of the chat settings at ticket creation; later setting changes do not
     # rewrite existing obligations or historical statistics.
@@ -100,6 +109,23 @@ class PendingReply(TimestampMixin, Base):
         ForeignKey("telegram_users.id", ondelete="SET NULL")
     )
     not_required_by_telegram_id: Mapped[int | None] = mapped_column(BigInteger)
+
+
+class PendingReplyMessage(Base):
+    """Every Telegram message that belongs to a ticket (the first one and merged ones)."""
+
+    __tablename__ = "pending_reply_messages"
+    __table_args__ = (Index("ix_pending_reply_messages_pending_reply_id", "pending_reply_id"),)
+
+    chat_id: Mapped[int] = mapped_column(
+        ForeignKey("monitored_chats.id", ondelete="CASCADE"), primary_key=True
+    )
+    message_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    pending_reply_id: Mapped[int] = mapped_column(
+        ForeignKey("pending_replies.id", ondelete="CASCADE"), nullable=False
+    )
+    message_date: Mapped[datetime] = mapped_column(nullable=False)
+    created_at: Mapped[datetime] = mapped_column(server_default=func.now(), nullable=False)
 
 
 class ReplyEvent(Base):

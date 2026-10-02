@@ -46,6 +46,7 @@ def build_bot_services(
         clock,
         MessageLinkService(),
         responsible_can_mark_not_required=settings.app.responsible_can_mark_not_required,
+        merge_consecutive_messages=settings.app.merge_consecutive_messages,
     )
     chats = ChatSettingsService(uow_factory, clock, AuditService(), settings.app)
     return BotServices(
