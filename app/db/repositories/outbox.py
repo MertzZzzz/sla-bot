@@ -4,12 +4,13 @@ from collections.abc import Sequence
 from datetime import datetime, timedelta
 from typing import Any
 
-from sqlalchemy import or_, select
+from sqlalchemy import Select, or_, select, update
 from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
-from app.core.enums import AggregateType, OutboxEventType, OutboxStatus
-from app.db.models import OutboxEvent
+from app.core.enums import AggregateType, OutboxEventType, OutboxStatus, PendingReplyStatus
+from app.db.models import OutboxEvent, PendingReply
 
 
 class OutboxRepository:
@@ -78,3 +79,39 @@ class OutboxRepository:
             .with_for_update(skip_locked=True)
         )
         return self._session.scalars(stmt).all()
+
+
+class AsyncOutboxRepository:
+    """Bot-side outbox operations (settings menu)."""
+
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    def _chat_events(self, chat_id: int) -> Select[tuple[OutboxEvent]]:
+        tickets = select(PendingReply.id).where(PendingReply.chat_id == chat_id)
+        return select(OutboxEvent).where(
+            OutboxEvent.aggregate_type == AggregateType.PENDING_REPLY,
+            OutboxEvent.aggregate_id.in_(tickets),
+        )
+
+    async def requeue_failed(self, chat_id: int, now: datetime) -> int:
+        """Retry failed escalations of still-overdue tickets (e.g. after fixing the target)."""
+        overdue = select(PendingReply.id).where(
+            PendingReply.chat_id == chat_id, PendingReply.status == PendingReplyStatus.OVERDUE
+        )
+        stmt = (
+            update(OutboxEvent)
+            .where(
+                OutboxEvent.status == OutboxStatus.FAILED,
+                OutboxEvent.aggregate_type == AggregateType.PENDING_REPLY,
+                OutboxEvent.aggregate_id.in_(overdue),
+            )
+            .values(status=OutboxStatus.PENDING, attempts=0, available_at=now, locked_at=None)
+            .returning(OutboxEvent.id)
+        )
+        return len((await self._session.scalars(stmt)).all())
+
+    async def last_for_chat(self, chat_id: int) -> OutboxEvent | None:
+        stmt = self._chat_events(chat_id).order_by(OutboxEvent.updated_at.desc()).limit(1)
+        event: OutboxEvent | None = await self._session.scalar(stmt)
+        return event

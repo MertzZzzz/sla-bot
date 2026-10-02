@@ -247,6 +247,15 @@ def _notification_lines(chat: MonitoredChatRead) -> list[str]:
     return [f"Чат уведомлений: {target}", f"Топик уведомлений: {topic}"]
 
 
+def _delivery_error_lines(details: MonitoredChatDetails) -> list[str]:
+    if not details.notification_error:
+        return []
+    return [
+        "⚠️ Последнее уведомление не доставлено: "
+        f"<i>{escape(truncate(details.notification_error, 200))}</i> — проверьте «🔔 Уведомления»"
+    ]
+
+
 def chat_text(details: MonitoredChatDetails) -> str:
     chat = details.chat
     responders = (
@@ -268,6 +277,7 @@ def chat_text(details: MonitoredChatDetails) -> str:
             f"Ответственный: {user_html(details.responsible)}",
             f"Отвечающие ({len(details.responders)}): {responders}",
             *_notification_lines(chat),
+            *_delivery_error_lines(details),
             f"Открытых ожиданий: {details.open_tickets}",
             f"Подключён: {format_datetime(chat.created_at, chat.timezone)}",
         ]

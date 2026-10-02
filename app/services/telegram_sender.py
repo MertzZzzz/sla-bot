@@ -29,3 +29,7 @@ class NotificationSender(Protocol):
     ) -> int:
         """Send an HTML notification with the "not required" button; return its message ID."""
         ...
+
+    def send_text(self, *, chat_id: int, text: str) -> None:
+        """Plain HTML message without buttons (technical alerts)."""
+        ...

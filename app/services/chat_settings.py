@@ -5,7 +5,13 @@ from dataclasses import dataclass
 from typing import Any
 
 from app.core.config import AppSettings
-from app.core.enums import ChatConfigAction, ChatType, PendingReplyStatus, ReplyEventType
+from app.core.enums import (
+    ChatConfigAction,
+    ChatType,
+    OutboxStatus,
+    PendingReplyStatus,
+    ReplyEventType,
+)
 from app.db.models import MonitoredChat, TelegramUser
 from app.db.uow import UnitOfWork
 from app.schemas.chats import (
@@ -38,6 +44,9 @@ UPDATE_ACTIONS: dict[str, ChatConfigAction] = {
     "notification_chat_id": ChatConfigAction.NOTIFICATION_CHANGED,
     "notification_thread_id": ChatConfigAction.NOTIFICATION_CHANGED,
 }
+
+
+NOTIFICATION_FIELDS = {"notification_chat_id", "notification_thread_id"}
 
 
 def _jsonable(chat: MonitoredChat, fields: set[str]) -> dict[str, Any]:
@@ -99,6 +108,9 @@ class ChatSettingsService:
             new = _jsonable(updated, fields)
             if values.get("is_enabled") is False:
                 await self._cancel_open_tickets(uow, chat.id, actor_id)
+            if old != new and values.keys() & NOTIFICATION_FIELDS:
+                # Escalations that failed (e.g. wrong chat ID) are retried at the new target.
+                await uow.outbox.requeue_failed(chat.id, self._clock.now())
             if old != new:
                 await self._audit.record_chat_change(
                     uow,
@@ -264,6 +276,7 @@ class ChatSettingsService:
             responders=tuple(TelegramUserRead.model_validate(u) for u in responders),
             members=tuple(TelegramUserRead.model_validate(u) for u in members),
             open_tickets=await uow.pending.count_open(chat.id) if full else 0,
+            notification_error=await _delivery_error(uow, chat.id) if full else None,
         )
 
     async def record_pilot_invite(
@@ -312,3 +325,10 @@ class ChatSettingsService:
             return None
         user = await uow.users.get(chat.responsible_user_id)
         return user.telegram_user_id if user else None
+
+
+async def _delivery_error(uow: UnitOfWork, chat_id: int) -> str | None:
+    last = await uow.outbox.last_for_chat(chat_id)
+    if last is None or last.status is not OutboxStatus.FAILED:
+        return None
+    return last.last_error or "неизвестная ошибка"

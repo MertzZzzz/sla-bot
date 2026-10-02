@@ -5,6 +5,7 @@ from collections.abc import Iterable
 from sqlalchemy import delete, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import Session
 
 from app.db.models import BotAdmin
 from app.db.models.admins import ADMIN_SOURCE_BOT, ADMIN_SOURCE_ENV
@@ -66,3 +67,11 @@ class AdminRepository:
         if ids:
             stale = stale.where(BotAdmin.telegram_user_id.not_in(ids))
         await self._session.execute(stale)
+
+
+class SyncAdminRepository:
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def telegram_ids(self) -> list[int]:
+        return list(self._session.scalars(select(BotAdmin.telegram_user_id)))

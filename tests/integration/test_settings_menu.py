@@ -23,6 +23,7 @@ from tests.integration.bot_harness import (
     feed,
     message,
     reset_fsm,
+    visible_chat,
 )
 from tests.integration.helpers import ADMIN_CHAT_ID, ADMIN_ID
 
@@ -325,6 +326,7 @@ async def test_notifications_here_in_admin_topic(
 
     await topic.press("Уведомления")
     await topic.press("Указать chat_id вручную")
+    tg.chats[-100999] = visible_chat(-100999, "Эскалации", forum=True)
     await topic.send("-100999 3")
     chat = (await details(services)).chat
     assert (chat.notification_chat_id, chat.notification_thread_id) == (-100999, 3)

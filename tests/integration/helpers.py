@@ -75,6 +75,12 @@ class FakeSender:
     gate: threading.Event | None = None
     _lock: threading.Lock = field(default_factory=threading.Lock)
 
+    texts: list[dict[str, object]] = field(default_factory=list)
+
+    def send_text(self, *, chat_id: int, text: str) -> None:
+        with self._lock:
+            self.texts.append({"chat_id": chat_id, "text": text})
+
     def send_notification(
         self, *, chat_id: int, thread_id: int | None, text: str, pending_reply_id: int
     ) -> int:

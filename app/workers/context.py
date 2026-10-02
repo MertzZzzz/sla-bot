@@ -37,9 +37,23 @@ def get_worker_context() -> WorkerContext:
         return SyncUnitOfWork(session_factory)
 
     clock = SystemClock()
+
+    def alert_recipients() -> list[int]:
+        """Global admins (.env and menu-added) privately, plus admin chats."""
+        with uow_factory() as uow:
+            admins = set(uow.admins.telegram_ids())
+        return [
+            *sorted(admins | settings.telegram.admin_telegram_ids),
+            *settings.telegram.admin_chat_ids,
+        ]
+
     return WorkerContext(
         sla=SlaService(uow_factory, clock, settings.celery),
         notifications=NotificationService(
-            uow_factory, AiogramNotificationSender(settings.telegram), clock, settings.celery
+            uow_factory,
+            AiogramNotificationSender(settings.telegram),
+            clock,
+            settings.celery,
+            alert_recipients,
         ),
     )

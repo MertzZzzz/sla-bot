@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from enum import StrEnum
@@ -22,6 +22,7 @@ from app.services.formatting import (
     user_mention,
 )
 from app.services.telegram_sender import (
+    DeliveryError,
     NotificationSender,
     PermanentDeliveryError,
     TransientDeliveryError,
@@ -163,11 +164,13 @@ class NotificationService:
         sender: NotificationSender,
         clock: Clock,
         settings: CelerySettings,
+        alert_recipients: Callable[[], Iterable[int]] = tuple,
     ) -> None:
         self._uow_factory = uow_factory
         self._sender = sender
         self._clock = clock
         self._settings = settings
+        self._alert_recipients = alert_recipients
 
     def deliver(self, event_id: int, *, task_id: str | None = None) -> DeliveryOutcome:
         claim = self._claim(event_id)
@@ -193,7 +196,9 @@ class NotificationService:
             return self._record_transient(event_id, claim.attempt, exc, log_ctx)
         except (PermanentDeliveryError, NotificationConfigError) as exc:
             error_type = exc.error_type if isinstance(exc, PermanentDeliveryError) else "config"
-            return self._record_failure(event_id, f"{error_type}: {exc}", log_ctx)
+            outcome = self._record_failure(event_id, f"{error_type}: {exc}", log_ctx)
+            self._alert_admins(payload, str(exc))
+            return outcome
         self._record_sent(event_id, payload, rendered, message_id)
         logger.info(
             "sla notification sent",
@@ -227,6 +232,16 @@ class NotificationService:
             event.locked_at = now
             event.attempts += 1
             payload = NotificationPayload.model_validate(event.payload)
+            chat = uow.chats.get(ticket.chat_id)
+            if chat is not None:
+                # Deliver where the chat's notifications point *now*: fixing a wrong
+                # target in the settings also fixes escalations that are being retried.
+                payload = payload.model_copy(
+                    update={
+                        "target_chat_id": chat.notification_chat_id,
+                        "target_thread_id": chat.notification_thread_id,
+                    }
+                )
             attempt = event.attempts
             uow.commit()
         return _Claim(None, payload, attempt)
@@ -303,6 +318,42 @@ class NotificationService:
             extra={"event": "notification_failed", "error_message": error, **log_ctx},
         )
         return DeliveryOutcome(DeliveryStatus.FAILED, reason=error)
+
+    def _alert_admins(self, payload: NotificationPayload, error: str) -> None:
+        """Tell admins in Telegram that an escalation was lost, with a copy of it.
+
+        Failures here are only logged: alerts must never break delivery bookkeeping.
+        """
+        target = f"<code>{payload.target_chat_id}</code>" if payload.target_chat_id else "не задан"
+        alert = "\n".join(
+            [
+                "⚠️ <b>Уведомление о нарушении SLA не доставлено</b>",
+                "",
+                f"Чат заказчика: «{escape(payload.chat_title)}»",
+                f"Чат уведомлений: {target}",
+                f"Ошибка: <i>{escape(error[:500])}</i>",
+                "",
+                "Исправьте: /menu → Чаты → чат → 🔔 Уведомления. После исправления "
+                "уведомление будет отправлено повторно, если ожидание ещё открыто.",
+            ]
+        )
+        copy = None
+        if payload.target_chat_id is not None:
+            copy = render_notification(payload, self._clock.now()).text
+        for chat_id in dict.fromkeys(self._alert_recipients()):
+            try:
+                self._sender.send_text(chat_id=chat_id, text=alert)
+                if copy:
+                    self._sender.send_text(chat_id=chat_id, text=copy)
+            except DeliveryError as exc:
+                logger.warning(
+                    "failed to deliver technical alert",
+                    extra={
+                        "event": "alert_failed",
+                        "telegram_chat_id": chat_id,
+                        "error_message": str(exc),
+                    },
+                )
 
     @staticmethod
     def _fail(event: OutboxEvent, error: str) -> None:

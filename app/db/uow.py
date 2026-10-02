@@ -12,7 +12,7 @@ from typing import Self
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.orm import Session, sessionmaker
 
-from app.db.repositories.admins import AdminRepository
+from app.db.repositories.admins import AdminRepository, SyncAdminRepository
 from app.db.repositories.audit import AuditRepository, SyncAuditRepository
 from app.db.repositories.chats import (
     ChatMemberRepository,
@@ -20,7 +20,7 @@ from app.db.repositories.chats import (
     ResponderRepository,
     SyncMonitoredChatRepository,
 )
-from app.db.repositories.outbox import OutboxRepository
+from app.db.repositories.outbox import AsyncOutboxRepository, OutboxRepository
 from app.db.repositories.pending_replies import PendingReplyRepository, PendingReplySyncRepository
 from app.db.repositories.pilot import PilotRepository
 from app.db.repositories.stats import StatsRepository
@@ -38,6 +38,7 @@ class UnitOfWork:
     stats: StatsRepository
     admins: AdminRepository
     pilot: PilotRepository
+    outbox: AsyncOutboxRepository
 
     def __init__(self, session_factory: async_sessionmaker[AsyncSession]) -> None:
         self._session_factory = session_factory
@@ -53,6 +54,7 @@ class UnitOfWork:
         self.stats = StatsRepository(self.session)
         self.admins = AdminRepository(self.session)
         self.pilot = PilotRepository(self.session)
+        self.outbox = AsyncOutboxRepository(self.session)
         return self
 
     async def __aexit__(
@@ -77,6 +79,7 @@ class SyncUnitOfWork:
     audit: SyncAuditRepository
     chats: SyncMonitoredChatRepository
     users: SyncUserRepository
+    admins: SyncAdminRepository
 
     def __init__(self, session_factory: sessionmaker[Session]) -> None:
         self._session_factory = session_factory
@@ -88,6 +91,7 @@ class SyncUnitOfWork:
         self.audit = SyncAuditRepository(self.session)
         self.chats = SyncMonitoredChatRepository(self.session)
         self.users = SyncUserRepository(self.session)
+        self.admins = SyncAdminRepository(self.session)
         return self
 
     def __exit__(

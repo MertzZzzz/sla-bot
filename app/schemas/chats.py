@@ -66,6 +66,8 @@ class MonitoredChatDetails(Schema):
     # settings menu, empty/zero elsewhere.
     members: tuple[TelegramUserRead, ...] = ()
     open_tickets: int = 0
+    # Error of the latest escalation if it could not be delivered.
+    notification_error: str | None = None
 
     def candidates(self) -> list[TelegramUserRead]:
         """People to offer in pickers: participants plus current responders/responsible."""

@@ -20,6 +20,7 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import CallbackQuery, Message, ReplyKeyboardRemove
 
 from app.bot import menus
+from app.bot.chat_target import TargetError, resolve_target
 from app.bot.extractors import user_data
 from app.bot.filters.is_global_admin import IsGlobalAdmin
 from app.bot.filters.settings_context import IsSettingsChat
@@ -707,11 +708,21 @@ async def input_notification(
     except CommandArgumentError as exc:
         await message.reply(str(exc))
         return
+    try:
+        target = await resolve_target(bot, value.notification_chat_id, value.notification_thread_id)
+    except TargetError as exc:
+        await message.reply(str(exc))
+        return
     changes = MonitoredChatUpdate(
-        notification_chat_id=value.notification_chat_id,
+        notification_chat_id=target.chat_id,
         notification_thread_id=value.notification_thread_id,
     )
-    notice = f"✅ Чат уведомлений: <code>{value.notification_chat_id}</code>"
+    notice = f"✅ Чат уведомлений: «{escape(target.title)}» (<code>{target.chat_id}</code>)"
+    if target.chat_id != value.notification_chat_id:
+        notice += (
+            f"\nℹ️ Вы ввели <code>{value.notification_chat_id}</code>: в Bot API ID групп "
+            "отрицательные, бот подобрал правильный."
+        )
     await _chat_updated(
         message, state=state, services=services, bot=bot, changes=changes, notice=notice
     )

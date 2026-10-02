@@ -13,6 +13,7 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.methods import (
     CreateChatInviteLink,
     EditMessageText,
+    GetChat,
     GetChatMember,
     GetMe,
     SendMessage,
@@ -21,6 +22,7 @@ from aiogram.methods import (
 from aiogram.types import (
     CallbackQuery,
     Chat,
+    ChatFullInfo,
     ChatInviteLink,
     ChatMemberMember,
     InlineKeyboardMarkup,
@@ -38,6 +40,17 @@ from tests.factories import T0
 BOT_USER = User(id=777, is_bot=True, first_name="SLA", username="sla_test_bot")
 
 
+def visible_chat(chat_id: int, title: str, *, forum: bool = False) -> ChatFullInfo:
+    # model_construct: the fake API needs only a few fields, and the list of required
+    # ChatFullInfo fields changes between aiogram releases.
+    return ChatFullInfo.model_construct(  # type: ignore[call-arg]
+        id=chat_id,
+        type="supergroup" if str(chat_id).startswith("-100") else "group",
+        title=title,
+        is_forum=forum or None,
+    )
+
+
 class RecordingSession(BaseSession):
     """Records every Bot API call; can simulate blocked users and chat members."""
 
@@ -47,6 +60,8 @@ class RecordingSession(BaseSession):
         self.forbidden_chats: set[int] = set()
         self.members: dict[int, User] = {}
         self.invites_forbidden = False
+        # Chats visible to the bot via getChat (the bot is a member of them).
+        self.chats: dict[int, ChatFullInfo] = {}
 
     async def make_request(
         self,
@@ -57,7 +72,14 @@ class RecordingSession(BaseSession):
         self.requests.append(method)
         if isinstance(method, GetMe):
             return BOT_USER
+        if isinstance(method, GetChat):
+            chat = self.chats.get(int(method.chat_id))
+            if chat is None:
+                raise TelegramBadRequest(method, "Bad Request: chat not found")
+            return chat
         if isinstance(method, GetChatMember):
+            if method.user_id == BOT_USER.id and int(method.chat_id) in self.chats:
+                return ChatMemberMember(user=BOT_USER)
             user = self.members.get(method.user_id)
             if user is None:
                 raise TelegramBadRequest(method, "Bad Request: user not found")

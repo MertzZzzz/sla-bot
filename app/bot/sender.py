@@ -96,6 +96,27 @@ class AiogramNotificationSender:
     ) -> int:
         return asyncio.run(self._send(chat_id, thread_id, text, pending_reply_id))
 
+    def send_text(self, *, chat_id: int, text: str) -> None:
+        asyncio.run(self._send_text(chat_id, text))
+
+    async def _send_text(self, chat_id: int, text: str) -> None:
+        bot = build_bot(self._settings, self._api)
+        try:
+            await bot.send_message(chat_id=chat_id, text=text)
+        except (TelegramAPIError, TelegramNetworkError) as exc:
+            raise map_telegram_error(exc) from exc
+        except (
+            TimeoutError,
+            ProxyError,
+            ProxyConnectionError,
+            ProxyTimeoutError,
+            ClientError,
+            OSError,
+        ) as exc:
+            raise TransientDeliveryError(str(exc), error_type=type(exc).__name__) from exc
+        finally:
+            await bot.session.close()
+
     async def _send(
         self, chat_id: int, thread_id: int | None, text: str, pending_reply_id: int
     ) -> int:
