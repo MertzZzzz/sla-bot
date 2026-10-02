@@ -13,6 +13,7 @@ from app.services.clock import Clock, SystemClock
 from app.services.message_links import MessageLinkService
 from app.services.message_processing import MessageProcessingService
 from app.services.pending_replies import PendingReplyService
+from app.services.pilot import PilotService
 from app.services.reassignment import ReassignmentService
 from app.services.stats import StatsService
 from app.services.users import TelegramUserService
@@ -29,6 +30,7 @@ class BotServices:
     users: TelegramUserService
     reassignment: ReassignmentService
     admins: AdminService
+    pilot: PilotService
 
 
 def build_bot_services(
@@ -57,4 +59,5 @@ def build_bot_services(
         users=TelegramUserService(uow_factory, clock),
         reassignment=ReassignmentService(uow_factory, chats),
         admins=AdminService(uow_factory, clock, settings.telegram.admin_telegram_ids),
+        pilot=PilotService(uow_factory),
     )

@@ -10,6 +10,7 @@ import contextlib
 import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 
 from aiogram import Bot, F, Router
 from aiogram.exceptions import TelegramAPIError, TelegramBadRequest
@@ -19,16 +20,21 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import CallbackQuery, Message, ReplyKeyboardRemove
 
 from app.bot import menus
+from app.bot.extractors import user_data
 from app.bot.filters.is_global_admin import IsGlobalAdmin
 from app.bot.filters.settings_context import IsSettingsChat
+from app.bot.invites import format_invite_report, invite_pilot
 from app.bot.menus import Screen
 from app.bot.services import BotServices
-from app.bot.texts import HELP_TEXT, NOT_ADMIN_PRIVATE
+from app.bot.texts import HELP_TEXT, NOT_ADMIN_PRIVATE, PILOT_WELCOME
 from app.bot.user_input import (
+    MAX_SHARED_USERS,
+    PEOPLE_USAGE,
     USAGE,
     UserInputError,
     from_read,
     pick_user_keyboard,
+    resolve_people,
     resolve_user,
 )
 from app.core.config import Settings
@@ -53,6 +59,7 @@ router.message.filter(IsSettingsChat())
 
 
 class MenuInput(StatesGroup):
+    pilot = State()
     sla = State()
     timezone = State()
     notification = State()
@@ -68,9 +75,19 @@ NOT_ADMIN_ALERT = "⛔ Недостаточно прав."
 # --- commands -----------------------------------------------------------------------
 
 
+async def _remember_user(message: Message, services: BotServices) -> bool:
+    """Private chats teach the bot who an @username is (needed to DM pilot invites)."""
+    if message.from_user is None or message.chat.type != "private":
+        return False
+    data = user_data(message.from_user)
+    await services.users.upsert(data)
+    return await services.pilot.link_user(data)
+
+
 @router.message(CommandStart(), IsGlobalAdmin())
 @router.message(Command("menu"), IsGlobalAdmin())
-async def cmd_menu(message: Message, state: FSMContext) -> None:
+async def cmd_menu(message: Message, state: FSMContext, services: BotServices) -> None:
+    await _remember_user(message, services)
     await _drop_input(message, state)
     screen = menus.main_menu()
     await message.answer(screen.text, reply_markup=screen.markup)
@@ -90,7 +107,10 @@ async def cmd_cancel(message: Message, state: FSMContext) -> None:
 
 
 @router.message(CommandStart(), F.chat.type == "private")
-async def cmd_start_not_admin(message: Message) -> None:
+async def cmd_start_not_admin(message: Message, services: BotServices) -> None:
+    if await _remember_user(message, services):
+        await message.answer(PILOT_WELCOME)
+        return
     await message.answer(NOT_ADMIN_PRIVATE)
 
 
@@ -108,6 +128,7 @@ class Ctx:
     bot: Bot
     toast: str | None = None
     alert: bool = False
+    answered: bool = False
     extra: dict[str, object] = field(default_factory=dict)
 
     @property
@@ -119,6 +140,7 @@ Handler = Callable[[Ctx], Awaitable[Screen | None]]
 HANDLERS: dict[A, Handler] = {}
 INPUT_ACTIONS = {
     A.ADMIN_ADD,
+    A.PILOT_ADD,
     A.SLA_INPUT,
     A.TIMEZONE_INPUT,
     A.RESPONSIBLE_INPUT,
@@ -160,7 +182,8 @@ async def on_menu(
     ctx = Ctx(callback, message, callback_data, services, settings, state, bot)
     handler = HANDLERS.get(callback_data.a)
     screen = await handler(ctx) if handler else None
-    await callback.answer(ctx.toast, show_alert=ctx.alert)
+    if not ctx.answered:
+        await callback.answer(ctx.toast, show_alert=ctx.alert)
     if screen is not None:
         await show(message, screen)
 
@@ -243,6 +266,77 @@ async def admin_add(ctx: Ctx) -> Screen:
     return await _prompt_user(
         ctx, MenuInput.admin, chat_id=0, title="➕ <b>Новый администратор</b>", cancel_to=A.ADMINS
     )
+
+
+# pilot participants
+
+
+@on(A.PILOT)
+async def pilot_list(ctx: Ctx) -> Screen:
+    return menus.pilot_screen(await ctx.services.pilot.list_all(), ctx.data.p)
+
+
+@on(A.PILOT_ITEM)
+async def pilot_item(ctx: Ctx) -> Screen:
+    person = await ctx.services.pilot.get(ctx.data.i)
+    if person is None:
+        ctx.toast = "Участник не найден."
+        return await pilot_list(ctx)
+    added_by = None
+    if person.added_by_telegram_id:
+        known = await ctx.services.users.find(str(person.added_by_telegram_id))
+        added_by = menus.user_name(known) if known else str(person.added_by_telegram_id)
+    return menus.pilot_item_screen(person, added_by, ctx.settings.app.default_timezone)
+
+
+@on(A.PILOT_DELETE)
+async def pilot_delete(ctx: Ctx) -> Screen:
+    person = await ctx.services.pilot.get(ctx.data.i)
+    if person is None:
+        return await pilot_list(ctx)
+    return menus.pilot_delete_confirm(person)
+
+
+@on(A.PILOT_DELETE_CONFIRM)
+async def pilot_delete_confirm(ctx: Ctx) -> Screen:
+    removed = await ctx.services.pilot.remove(ctx.data.i)
+    ctx.toast = "Удалён из участников пилота" if removed else "Участник не найден."
+    return await pilot_list(ctx)
+
+
+@on(A.PILOT_ADD)
+async def pilot_add(ctx: Ctx) -> Screen:
+    private = ctx.message.chat.type == "private"
+    text = f"🧪 <b>Новые участники пилота</b>\n\n{PEOPLE_USAGE}"
+    if private:
+        text += "\nИли нажмите «👤 Выбрать пользователя» внизу (до 10 человек за раз)."
+        await ctx.message.answer(
+            "👇 Выбор пользователей", reply_markup=pick_user_keyboard(MAX_SHARED_USERS)
+        )
+    return await _prompt(ctx, MenuInput.pilot, text, A.PILOT, reply_kb=private)
+
+
+@on(A.INVITE)
+async def invite(ctx: Ctx) -> Screen:
+    details = await _card(ctx)
+    if details is None:
+        return await chats_list(ctx)
+    return menus.invite_confirm_screen(details, await ctx.services.pilot.list_all())
+
+
+@on(A.INVITE_RUN)
+async def invite_run(ctx: Ctx) -> Screen:
+    details = await _card(ctx)
+    if details is None:
+        return await chats_list(ctx)
+    # Creating links and messaging people takes a while: answer the button right away.
+    await ctx.callback.answer("Отправляю приглашения…")
+    ctx.answered = True
+    report = await invite_pilot(ctx.bot, ctx.services, details, ctx.actor_id, datetime.now(UTC))
+    first, *rest = format_invite_report(report)
+    for chunk in rest:
+        await ctx.message.answer(chunk)
+    return menus.invite_result_screen(details.chat.id, first)
 
 
 # chats
@@ -670,3 +764,23 @@ async def _input_admin(
     )
     screen = menus.admins_screen(await services.admins.list_admins())
     await _finish(message, state, bot, Screen(f"{notice}\n\n{screen.text}", screen.markup))
+
+
+@router.message(StateFilter(MenuInput.pilot), IsGlobalAdmin(), NOT_COMMAND)
+async def input_pilot(message: Message, state: FSMContext, services: BotServices, bot: Bot) -> None:
+    assert message.from_user is not None
+    try:
+        people = await resolve_people(message, bot, services)
+    except UserInputError as exc:
+        await message.reply(str(exc))
+        return
+    result = await services.pilot.add(people, message.from_user.id)
+    notice_lines = []
+    if result.added:
+        notice_lines.append("✅ Добавлены: " + ", ".join(escape(x) for x in result.added))
+    if result.already:
+        notice_lines.append("ℹ️ Уже в списке: " + ", ".join(escape(x) for x in result.already))
+    screen = menus.pilot_screen(
+        await services.pilot.list_all(), 0, notice="\n".join(notice_lines) or None
+    )
+    await _finish(message, state, bot, screen)

@@ -20,6 +20,7 @@ from app.services.formatting import (
     format_duration,
     truncate,
 )
+from app.services.pilot import PilotView
 
 CHATS_PAGE_SIZE = 10
 PEOPLE_PAGE_SIZE = 8
@@ -127,7 +128,10 @@ def prompt_screen(text: str, cancel_to: A, i: int = 0) -> Screen:
 def main_menu() -> Screen:
     return Screen(
         "⚙️ <b>Настройки SLA-бота</b>\n\nВыберите раздел.",
-        keyboard([button("👮 Администраторы", A.ADMINS), button("💬 Чаты", A.CHATS)]),
+        keyboard(
+            [button("👮 Администраторы", A.ADMINS), button("💬 Чаты", A.CHATS)],
+            [button("🧪 Участники пилота", A.PILOT)],
+        ),
     )
 
 
@@ -293,6 +297,7 @@ def chat_screen(details: MonitoredChatDetails, notice: str | None = None) -> Scr
             ],
             [button("🔔 Уведомления", A.NOTIFICATIONS, i)],
             [button(f"🕒 Открытые ожидания ({details.open_tickets})", A.OPEN_TICKETS, i)],
+            [button("📨 Пригласить участников пилота", A.INVITE, i)],
             [button("« Чаты", A.CHATS)],
         ),
     )
@@ -471,3 +476,114 @@ def open_tickets_screen(details: MonitoredChatDetails, tickets: list[PendingRepl
             break
         lines.append(line)
     return Screen("\n".join(lines), keyboard(back_to_chat(chat.id)))
+
+
+# --- pilot participants ---------------------------------------------------------------
+
+
+def pilot_screen(people: list[PilotView], page: int, notice: str | None = None) -> Screen:
+    lines = [f"🧪 <b>Участники пилота</b> ({len(people)})", ""]
+    if people:
+        lines.append(
+            "Их можно пригласить в любой чат заказчика: Чаты → чат → «📨 Пригласить участников "
+            "пилота» (или /invite_all в чате заказчика)."
+        )
+        if any(p.telegram_user_id is None for p in people):
+            lines.append(
+                "❔ — бот ещё не знает пользователя: попросите его написать боту /start, "
+                "тогда ссылка придёт ему в личку автоматически."
+            )
+    else:
+        lines.append("Список пуст. Добавьте участников по @username.")
+    if notice:
+        lines = [notice, "", *lines]
+    visible, page = _page(people, page, CHATS_PAGE_SIZE)
+    rows = [
+        [
+            button(
+                ("❔ " if p.telegram_user_id is None else "") + truncate(p.label, 40),
+                A.PILOT_ITEM,
+                p.id,
+            )
+        ]
+        for p in visible
+    ]
+    return Screen(
+        "\n".join(lines),
+        keyboard(
+            *rows,
+            _pager(A.PILOT, 0, page, len(people), CHATS_PAGE_SIZE),
+            [button("➕ Добавить участников", A.PILOT_ADD)],
+            [button("« Меню", A.HOME)],
+        ),
+    )
+
+
+def pilot_item_screen(person: PilotView, added_by: str | None, timezone: str) -> Screen:
+    user_id = (
+        f"<code>{person.telegram_user_id}</code>"
+        if person.telegram_user_id
+        else "<i>неизвестен</i> — попросите написать боту /start"
+    )
+    lines = [
+        "🧪 <b>Участник пилота</b>",
+        "",
+        f"Username: {'@' + escape(person.username) if person.username else NOT_SET}",
+        f"Имя: {escape(person.display_name) if person.display_name else NOT_SET}",
+        f"Telegram ID: {user_id}",
+        f"Кто добавил: {escape(added_by) if added_by else NOT_SET}",
+        f"Добавлен: {format_datetime(person.created_at, timezone)}",
+    ]
+    return Screen(
+        "\n".join(lines),
+        keyboard(
+            [button("🗑 Удалить из списка", A.PILOT_DELETE, person.id)],
+            [button("« Участники пилота", A.PILOT)],
+        ),
+    )
+
+
+def pilot_delete_confirm(person: PilotView) -> Screen:
+    return Screen(
+        f"Удалить <b>{escape(person.label)}</b> из участников пилота?",
+        keyboard(
+            [
+                button("🗑 Да, удалить", A.PILOT_DELETE_CONFIRM, person.id),
+                button("Отмена", A.PILOT_ITEM, person.id),
+            ]
+        ),
+    )
+
+
+def invite_confirm_screen(details: MonitoredChatDetails, people: list[PilotView]) -> Screen:
+    chat = details.chat
+    if not people:
+        return Screen(
+            f"📨 <b>Приглашение в «{escape(chat.title)}»</b>\n\n"
+            "Список участников пилота пуст — сначала добавьте их.",
+            keyboard([button("🧪 Участники пилота", A.PILOT)], back_to_chat(chat.id)),
+        )
+    names = ", ".join(escape(p.label) for p in people)
+    return Screen(
+        "\n".join(
+            [
+                f"📨 <b>Приглашение в «{escape(chat.title)}»</b>",
+                "",
+                f"Участники пилота ({len(people)}): {names}",
+                "",
+                "Бот создаст каждому личную одноразовую ссылку (действует 7 дней) и пришлёт её "
+                "в личку. Кто уже в чате — пропускается. Кому бот написать не может "
+                "(не нажимал /start), их ссылки придут вам, чтобы переслать вручную.",
+                "",
+                "Боту нужны права администратора чата с правом приглашать пользователей.",
+            ]
+        ),
+        keyboard(
+            [button("📨 Пригласить", A.INVITE_RUN, chat.id)],
+            back_to_chat(chat.id),
+        ),
+    )
+
+
+def invite_result_screen(chat_id: int, text: str) -> Screen:
+    return Screen(text, keyboard(back_to_chat(chat_id)))

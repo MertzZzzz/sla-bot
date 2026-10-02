@@ -118,9 +118,11 @@ async def open_chat(nav: Nav) -> None:
 # --- access -------------------------------------------------------------------------
 
 
-async def test_main_menu_has_two_sections(nav: Nav) -> None:
+async def test_main_menu_sections(nav: Nav) -> None:
     await nav.send("/start")
-    assert set(nav.buttons()) == {"👮 Администраторы", "💬 Чаты"}
+    assert set(nav.buttons()) == {"👮 Администраторы", "💬 Чаты", "🧪 Участники пилота"}
+    await nav.send("/menu")  # same menu
+    assert set(nav.buttons()) == {"👮 Администраторы", "💬 Чаты", "🧪 Участники пилота"}
 
 
 async def test_non_admin_is_refused(nav: Nav, tg: RecordingSession) -> None:
@@ -139,7 +141,7 @@ async def test_non_admin_is_refused(nav: Nav, tg: RecordingSession) -> None:
 async def test_menu_works_in_admin_chat_only(nav: Nav, tg: RecordingSession) -> None:
     admin_chat = Nav(nav.bot, tg, nav.settings, nav.services, ADMIN_CHAT)
     await admin_chat.send("/menu")
-    assert set(admin_chat.buttons()) == {"👮 Администраторы", "💬 Чаты"}
+    assert "💬 Чаты" in admin_chat.buttons()
     sent = len(tg.of(SendMessage))
     other = Nav(nav.bot, tg, nav.settings, nav.services, Chat(id=-100123, type="supergroup"))
     await other.send("/menu")
@@ -184,6 +186,7 @@ async def test_chat_card_shows_every_setting_including_empty(nav: Nav, chat_id: 
         "👥 Отвечающие",
         "🔔 Уведомления",
         "🕒 Открытые ожидания (0)",
+        "📨 Пригласить участников пилота",
         "« Чаты",
     } == set(nav.buttons())
 

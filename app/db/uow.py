@@ -22,6 +22,7 @@ from app.db.repositories.chats import (
 )
 from app.db.repositories.outbox import OutboxRepository
 from app.db.repositories.pending_replies import PendingReplyRepository, PendingReplySyncRepository
+from app.db.repositories.pilot import PilotRepository
 from app.db.repositories.stats import StatsRepository
 from app.db.repositories.users import SyncUserRepository, UserRepository
 
@@ -36,6 +37,7 @@ class UnitOfWork:
     audit: AuditRepository
     stats: StatsRepository
     admins: AdminRepository
+    pilot: PilotRepository
 
     def __init__(self, session_factory: async_sessionmaker[AsyncSession]) -> None:
         self._session_factory = session_factory
@@ -50,6 +52,7 @@ class UnitOfWork:
         self.audit = AuditRepository(self.session)
         self.stats = StatsRepository(self.session)
         self.admins = AdminRepository(self.session)
+        self.pilot = PilotRepository(self.session)
         return self
 
     async def __aexit__(

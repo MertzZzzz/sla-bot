@@ -43,6 +43,14 @@ class MenuAction(StrEnum):
     ADMIN_NOTIFY = "an"
     ADMIN_DELETE = "ad"
     ADMIN_DELETE_CONFIRM = "ay"
+    # pilot participants
+    PILOT = "pl"
+    PILOT_ITEM = "pi"
+    PILOT_ADD = "pa"
+    PILOT_DELETE = "pd"
+    PILOT_DELETE_CONFIRM = "py"
+    INVITE = "iv"
+    INVITE_RUN = "ir"
     # chats
     CHATS = "cl"
     CHAT = "cc"

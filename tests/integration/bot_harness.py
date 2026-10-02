@@ -11,6 +11,7 @@ from aiogram.client.session.base import BaseSession
 from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.methods import (
+    CreateChatInviteLink,
     EditMessageText,
     GetChatMember,
     GetMe,
@@ -20,6 +21,7 @@ from aiogram.methods import (
 from aiogram.types import (
     CallbackQuery,
     Chat,
+    ChatInviteLink,
     ChatMemberMember,
     InlineKeyboardMarkup,
     Message,
@@ -44,6 +46,7 @@ class RecordingSession(BaseSession):
         self.requests: list[TelegramMethod[Any]] = []
         self.forbidden_chats: set[int] = set()
         self.members: dict[int, User] = {}
+        self.invites_forbidden = False
 
     async def make_request(
         self,
@@ -59,6 +62,18 @@ class RecordingSession(BaseSession):
             if user is None:
                 raise TelegramBadRequest(method, "Bad Request: user not found")
             return ChatMemberMember(user=user)
+        if isinstance(method, CreateChatInviteLink):
+            if self.invites_forbidden:
+                raise TelegramBadRequest(method, "Bad Request: not enough rights")
+            return ChatInviteLink(
+                invite_link=f"https://t.me/+invite{len(self.requests)}",
+                creator=BOT_USER,
+                creates_join_request=False,
+                is_primary=False,
+                is_revoked=False,
+                name=method.name,
+                member_limit=method.member_limit,
+            )
         if isinstance(method, SendMessage | EditMessageText):
             chat_id = int(getattr(method, "chat_id", 0) or 0)
             if chat_id in self.forbidden_chats:

@@ -266,6 +266,20 @@ class ChatSettingsService:
             open_tickets=await uow.pending.count_open(chat.id) if full else 0,
         )
 
+    async def record_pilot_invite(
+        self, telegram_chat_id: int, actor_id: int, summary: dict[str, Any]
+    ) -> None:
+        async with self._uow_factory() as uow:
+            chat = await self._require(uow, telegram_chat_id)
+            await self._audit.record_chat_change(
+                uow,
+                chat_id=chat.id,
+                actor_telegram_user_id=actor_id,
+                action=ChatConfigAction.PILOT_INVITED,
+                new_value=summary,
+            )
+            await uow.commit()
+
     async def clear_responsible(self, telegram_chat_id: int, actor_id: int) -> None:
         async with self._uow_factory() as uow:
             chat = await self._require(uow, telegram_chat_id, for_update=True)

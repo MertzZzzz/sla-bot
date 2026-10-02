@@ -1,4 +1,4 @@
-"""Customer (monitored) group chats: the only command is /chat_add.
+"""Customer (monitored) group chats: only /chat_add and /invite_all (admins).
 
 Everything else is configured in a private chat with the bot or in an admin chat, so
 the customer never sees configuration traffic. Other commands are silently ignored.
@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import contextlib
 import logging
+from datetime import UTC, datetime
 
 from aiogram import Bot, Router
 from aiogram.exceptions import TelegramAPIError
@@ -16,6 +17,7 @@ from aiogram.types import Message
 
 from app.bot.extractors import GROUP_TYPES
 from app.bot.filters.is_global_admin import IsGlobalAdmin
+from app.bot.invites import format_invite_report, invite_pilot
 from app.bot.menus import chat_screen
 from app.bot.services import BotServices
 from app.core.config import Settings
@@ -79,3 +81,30 @@ async def _try_delete(message: Message) -> None:
     """Keep the customer chat clean; needs the "delete messages" admin right."""
     with contextlib.suppress(TelegramAPIError):
         await message.delete()
+
+
+INVITE_HINT = "Чтобы получить отчёт о приглашениях, откройте личный чат с ботом и нажмите /start."
+
+
+@router.message(Command("invite_all"), IsGlobalAdmin())
+async def cmd_invite_all(
+    message: Message, services: BotServices, settings: Settings, bot: Bot
+) -> None:
+    """Invite pilot participants into this chat; the report goes to the admin privately."""
+    assert message.from_user is not None
+    if message.chat.type not in GROUP_TYPES or settings.is_admin_chat(message.chat.id):
+        return
+    await _try_delete(message)
+    actor = message.from_user.id
+    details = await services.chats.get_details(message.chat.id)
+    if details is None:
+        chunks = ["Этот чат ещё не подключён: сначала выполните в нём /chat_add."]
+    else:
+        report = await invite_pilot(bot, services, details, actor, datetime.now(UTC))
+        chunks = format_invite_report(report)
+    try:
+        for chunk in chunks:
+            await bot.send_message(actor, chunk)
+    except TelegramAPIError:
+        # Never post invite links into the customer chat.
+        await message.answer(INVITE_HINT)

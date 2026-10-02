@@ -32,7 +32,7 @@ class UserInputError(ValueError):
     """User-facing explanation why the input could not be resolved."""
 
 
-def pick_user_keyboard() -> ReplyKeyboardMarkup:
+def pick_user_keyboard(max_quantity: int = 1) -> ReplyKeyboardMarkup:
     """Native Telegram user picker; works only in a private chat with the bot."""
     return ReplyKeyboardMarkup(
         keyboard=[
@@ -42,7 +42,7 @@ def pick_user_keyboard() -> ReplyKeyboardMarkup:
                     request_users=KeyboardButtonRequestUsers(
                         request_id=PICK_REQUEST_ID,
                         user_is_bot=False,
-                        max_quantity=1,
+                        max_quantity=max_quantity,
                         request_name=True,
                         request_username=True,
                     ),
@@ -122,3 +122,54 @@ def _not_bot(user: TelegramUserData) -> TelegramUserData:
         msg = "Нельзя выбрать бота."
         raise UserInputError(msg)
     return user
+
+
+TOKEN_SPLIT_RE = re.compile(r"[\s,;]+")
+MAX_SHARED_USERS = 10
+
+
+async def resolve_people(
+    message: Message, bot: Bot, services: BotServices
+) -> list[TelegramUserData | str]:
+    """Several people at once: picker (up to 10), a forward, or a list of @usernames/IDs.
+
+    Unknown usernames are returned as plain strings: the Bot API cannot look them up,
+    they get an ID once the person writes to the bot.
+    """
+    if message.users_shared and message.users_shared.users:
+        return [
+            TelegramUserData(
+                telegram_user_id=u.user_id,
+                first_name=u.first_name,
+                last_name=u.last_name,
+                username=u.username,
+            )
+            for u in message.users_shared.users
+        ]
+    if message.forward_origin is not None:
+        return [await resolve_user(message, bot, services, None)]
+    tokens = [t for t in TOKEN_SPLIT_RE.split((message.text or "").strip()) if t]
+    if not tokens:
+        raise UserInputError(PEOPLE_USAGE)
+    people: list[TelegramUserData | str] = []
+    invalid: list[str] = []
+    for token in tokens:
+        if token.isdigit() and int(token) > 0:
+            known = await services.users.find(token)
+            people.append(
+                from_read(known) if known else TelegramUserData(telegram_user_id=int(token))
+            )
+        elif USERNAME_RE.fullmatch(token):
+            people.append(token.lstrip("@"))
+        else:
+            invalid.append(token)
+    if invalid:
+        msg = "Не похоже на @username или ID: " + ", ".join(invalid[:10]) + "\n\n" + PEOPLE_USAGE
+        raise UserInputError(msg)
+    return people
+
+
+PEOPLE_USAGE = (
+    "Отправьте одного или нескольких пользователей через пробел или с новой строки: "
+    "<code>@ivan @olga 123456789</code>. Можно переслать сообщение человека."
+)
