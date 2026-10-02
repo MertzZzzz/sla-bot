@@ -38,6 +38,7 @@ class MessageProcessingService:
                 if chat.title != msg.chat_title:
                     chat.title = msg.chat_title
                 user = await uow.users.upsert(msg.author, now)
+                await uow.members.touch(chat.id, user.id, now)
                 if await uow.responders.is_responder(chat.id, user.id):
                     result = await self._pending.close_in(uow, chat, user, msg, now)
                 else:

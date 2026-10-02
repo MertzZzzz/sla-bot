@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import BigInteger, CheckConstraint, ForeignKey, Integer, String, func
+from sqlalchemy import BigInteger, CheckConstraint, ForeignKey, Index, Integer, String, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.enums import ChatType, Priority, ReplyMatchMode
@@ -44,3 +44,19 @@ class ChatResponder(Base):
     )
     created_at: Mapped[datetime] = mapped_column(server_default=func.now(), nullable=False)
     created_by_telegram_user_id: Mapped[int | None] = mapped_column(BigInteger)
+
+
+class ChatMember(Base):
+    """Users seen writing in a monitored chat; offered as candidates in the settings menu."""
+
+    __tablename__ = "chat_members"
+    __table_args__ = (Index("ix_chat_members_chat_last_seen", "chat_id", "last_seen_at"),)
+
+    chat_id: Mapped[int] = mapped_column(
+        ForeignKey("monitored_chats.id", ondelete="CASCADE"), primary_key=True
+    )
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("telegram_users.id", ondelete="CASCADE"), primary_key=True
+    )
+    first_seen_at: Mapped[datetime] = mapped_column(server_default=func.now(), nullable=False)
+    last_seen_at: Mapped[datetime] = mapped_column(server_default=func.now(), nullable=False)

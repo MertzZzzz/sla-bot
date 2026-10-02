@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Iterable
 from datetime import datetime
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
@@ -44,6 +44,15 @@ class UserRepository:
     async def get_by_telegram_id(self, telegram_user_id: int) -> TelegramUser | None:
         user: TelegramUser | None = await self._session.scalar(
             select(TelegramUser).where(TelegramUser.telegram_user_id == telegram_user_id)
+        )
+        return user
+
+    async def get_by_username(self, username: str) -> TelegramUser | None:
+        user: TelegramUser | None = await self._session.scalar(
+            select(TelegramUser)
+            .where(func.lower(TelegramUser.username) == username.lower().lstrip("@"))
+            .order_by(TelegramUser.last_seen_at.desc())
+            .limit(1)
         )
         return user
 

@@ -6,6 +6,9 @@ import asyncio
 import logging
 
 from aiogram import Bot, Dispatcher
+from aiogram.exceptions import TelegramAPIError
+from aiogram.fsm.storage.redis import RedisStorage
+from aiogram.types import BotCommand, BotCommandScopeAllGroupChats, BotCommandScopeAllPrivateChats
 from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
 from aiohttp import web
 from redis.asyncio import Redis
@@ -67,6 +70,26 @@ async def _run_webhook(bot: Bot, dp: Dispatcher, app: web.Application, settings:
         await runner.cleanup()
 
 
+PRIVATE_COMMANDS = [
+    BotCommand(command="menu", description="Меню настроек"),
+    BotCommand(command="stats", description="Статистика SLA"),
+    BotCommand(command="cancel", description="Отменить ввод"),
+    BotCommand(command="help", description="Справка"),
+]
+
+
+async def _set_commands(bot: Bot) -> None:
+    """Show commands only in private chats: customers must not see bot commands."""
+    try:
+        await bot.set_my_commands(PRIVATE_COMMANDS, scope=BotCommandScopeAllPrivateChats())
+        await bot.delete_my_commands(scope=BotCommandScopeAllGroupChats())
+    except TelegramAPIError as exc:
+        logger.warning(
+            "failed to set bot commands",
+            extra={"event": "set_commands_failed", "error_type": type(exc).__name__},
+        )
+
+
 async def main() -> None:
     settings = get_settings()
     configure_logging(settings.logging)
@@ -79,7 +102,11 @@ async def main() -> None:
         socket_connect_timeout=2,
     )
     services = build_bot_services(settings, build_async_sessionmaker(engine))
-    dp = build_dispatcher(settings, services)
+    await services.admins.sync_env_admins()
+    storage = RedisStorage.from_url(
+        settings.redis.url(settings.redis.fsm_db), state_ttl=3600, data_ttl=3600
+    )
+    dp = build_dispatcher(settings, services, storage)
     bot = build_bot(settings.telegram)
     app = web.Application()
     setup_health(app, engine, redis)
@@ -91,6 +118,7 @@ async def main() -> None:
         )
     logger.info("bot starting", extra={"event": f"bot_start_{mode}"})
     try:
+        await _set_commands(bot)
         if settings.telegram.webhook_enabled:
             await _run_webhook(bot, dp, app, settings)
         else:
@@ -98,6 +126,7 @@ async def main() -> None:
     finally:
         await bot.session.close()
         await redis.aclose()
+        await storage.close()
         await engine.dispose()
 
 

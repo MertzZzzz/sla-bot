@@ -3,12 +3,12 @@ from __future__ import annotations
 from aiogram.filters import Filter
 from aiogram.types import CallbackQuery, Message
 
-from app.core.config import Settings
+from app.bot.services import BotServices
 
 
 class IsGlobalAdmin(Filter):
-    """Passes when the sender's Telegram ID is listed in APP_TELEGRAM__ADMIN_TELEGRAM_IDS."""
+    """Sender is an admin from .env or one added through the settings menu."""
 
-    async def __call__(self, event: Message | CallbackQuery, settings: Settings) -> bool:
+    async def __call__(self, event: Message | CallbackQuery, services: BotServices) -> bool:
         user = event.from_user
-        return user is not None and settings.is_global_admin(user.id)
+        return user is not None and await services.admins.is_admin(user.id)

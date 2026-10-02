@@ -74,6 +74,9 @@ def normalize_proxy_url(raw: str) -> str:
 class TelegramSettings(BaseModel):
     bot_token: SecretStr
     admin_telegram_ids: Annotated[frozenset[int], NoDecode] = frozenset()
+    # Group chats where global admins may open the settings menu (besides the private
+    # chat with the bot). Customer chats only accept /chat_add.
+    admin_chat_ids: Annotated[frozenset[int], NoDecode] = frozenset()
     webhook_enabled: bool = False
     webhook_base_url: str | None = None
     webhook_path: str = "/telegram/webhook"
@@ -107,7 +110,7 @@ class TelegramSettings(BaseModel):
         raw = value.get_secret_value() if isinstance(value, SecretStr) else value
         return None if isinstance(raw, str) and not raw else value
 
-    @field_validator("admin_telegram_ids", mode="before")
+    @field_validator("admin_telegram_ids", "admin_chat_ids", mode="before")
     @classmethod
     def parse_admin_ids(cls, value: object) -> object:
         if value is None:
@@ -125,6 +128,14 @@ class TelegramSettings(BaseModel):
     def admin_ids_positive(cls, value: frozenset[int]) -> frozenset[int]:
         if any(v <= 0 for v in value):
             msg = "Admin Telegram IDs must be positive user IDs"
+            raise ValueError(msg)
+        return value
+
+    @field_validator("admin_chat_ids")
+    @classmethod
+    def admin_chats_non_zero(cls, value: frozenset[int]) -> frozenset[int]:
+        if 0 in value:
+            msg = "Admin chat IDs must be non-zero Telegram chat IDs"
             raise ValueError(msg)
         return value
 
@@ -207,6 +218,7 @@ class RedisSettings(BaseModel):
     password: SecretStr | None = None
     broker_db: int = 0
     result_db: int = 1
+    fsm_db: int = 2  # short-lived dialog state of the settings menu (manual input)
 
     def url(self, db: int) -> str:
         auth = ""
@@ -272,8 +284,12 @@ class Settings(BaseSettings):
     celery: CelerySettings = CelerySettings()
     logging: LoggingSettings = LoggingSettings()
 
-    def is_global_admin(self, telegram_user_id: int | None) -> bool:
-        return telegram_user_id is not None and telegram_user_id in self.telegram.admin_telegram_ids
+    def is_admin_chat(self, telegram_chat_id: int) -> bool:
+        return telegram_chat_id in self.telegram.admin_chat_ids
+
+    def is_settings_chat(self, telegram_chat_id: int, chat_type: str) -> bool:
+        """Settings are managed only in a private chat with the bot or in admin chats."""
+        return chat_type == "private" or self.is_admin_chat(telegram_chat_id)
 
 
 @lru_cache(maxsize=1)

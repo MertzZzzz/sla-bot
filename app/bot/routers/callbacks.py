@@ -9,7 +9,6 @@ from aiogram.types import CallbackQuery, InlineKeyboardMarkup, Message
 from app.bot.extractors import user_data
 from app.bot.keyboards.pending_reply import candidates_keyboard, notification_keyboard
 from app.bot.services import BotServices
-from app.core.config import Settings
 from app.core.enums import PendingReplyStatus
 from app.schemas.callbacks import (
     PendingReplyAction,
@@ -42,13 +41,12 @@ async def on_not_required(
     callback: CallbackQuery,
     callback_data: PendingReplyCallbackData,
     services: BotServices,
-    settings: Settings,
 ) -> None:
     actor = user_data(callback.from_user)
     result = await services.pending.mark_not_required(
         callback_data.pending_reply_id,
         actor,
-        is_admin=settings.is_global_admin(actor.telegram_user_id),
+        is_admin=await services.admins.is_admin(actor.telegram_user_id),
     )
     log_ctx = {
         "pending_reply_id": callback_data.pending_reply_id,
@@ -82,7 +80,7 @@ REASSIGN_DENIED_TEXT: dict[ReassignOutcome, str] = {
     ReassignOutcome.FORBIDDEN: "⛔ Недостаточно прав.",
     ReassignOutcome.FINAL: "Сообщение уже закрыто — ответственного не сменить.",
     ReassignOutcome.NO_CANDIDATES: (
-        "Некого назначить: добавьте отвечающих в чате командой /chat_add_responder."
+        "Некого назначить: добавьте отвечающих в меню (/menu → Чаты → чат → Отвечающие)."
     ),
     ReassignOutcome.INVALID_USER: "Пользователь больше не входит в число отвечающих.",
     ReassignOutcome.UNCHANGED: "Этот пользователь уже ответственный.",
@@ -103,7 +101,6 @@ async def on_reassign_menu(
     callback: CallbackQuery,
     callback_data: ReassignCallbackData,
     services: BotServices,
-    settings: Settings,
 ) -> None:
     scope, set_action = MENU_SCOPES[callback_data.action]
     actor_id = callback.from_user.id
@@ -111,7 +108,7 @@ async def on_reassign_menu(
         callback_data.pending_reply_id,
         scope,
         actor_id,
-        is_admin=settings.is_global_admin(actor_id),
+        is_admin=await services.admins.is_admin(actor_id),
     )
     if options.outcome is not ReassignOutcome.OK:
         await callback.answer(REASSIGN_DENIED_TEXT[options.outcome], show_alert=True)
@@ -136,7 +133,6 @@ async def on_reassign_set(
     callback: CallbackQuery,
     callback_data: ReassignCallbackData,
     services: BotServices,
-    settings: Settings,
 ) -> None:
     scope = SET_SCOPES[callback_data.action]
     actor = user_data(callback.from_user)
@@ -145,7 +141,7 @@ async def on_reassign_set(
         scope,
         callback_data.user_id,
         actor,
-        is_admin=settings.is_global_admin(actor.telegram_user_id),
+        is_admin=await services.admins.is_admin(actor.telegram_user_id),
     )
     if result.outcome is not ReassignOutcome.OK or result.new is None:
         await callback.answer(REASSIGN_DENIED_TEXT[result.outcome], show_alert=True)

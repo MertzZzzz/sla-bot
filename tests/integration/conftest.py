@@ -29,6 +29,7 @@ from tests.factories import FakeClock
 ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_URL = "postgresql+psycopg://postgres@127.0.0.1:5432/postgres"
 ADMIN_ID = 1000
+ADMIN_CHAT_ID = -100500
 
 pytestmark = pytest.mark.integration
 
@@ -95,6 +96,7 @@ def settings() -> Settings:
         telegram=TelegramSettings(
             bot_token=SecretStr("1:test"),
             admin_telegram_ids=frozenset({ADMIN_ID}),
+            admin_chat_ids=frozenset({ADMIN_CHAT_ID}),
         ),
         celery=CelerySettings(retry_backoff_base_seconds=5, max_delivery_attempts=3),
     )

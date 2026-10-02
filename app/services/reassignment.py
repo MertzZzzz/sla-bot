@@ -5,7 +5,7 @@ Two scopes:
 * ``TICKET`` — the responsible of this one message (the ticket's snapshot). Allowed for
   global admins and for the ticket's current responsible (hand-off). Statistics follow
   the ticket, so the breach is attributed to the new responsible.
-* ``CHAT`` — the chat's responsible for *future* messages (same as /chat_responsible).
+* ``CHAT`` — the chat's responsible for *future* messages (same as the menu).
   Global admins only; existing tickets keep their snapshot.
 
 Candidates are the chat's responders; a user not in that list is rejected even if a

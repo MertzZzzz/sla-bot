@@ -18,3 +18,13 @@ class TelegramUserService:
             result = TelegramUserRead.model_validate(user)
             await uow.commit()
         return result
+
+    async def find(self, query: str) -> TelegramUserRead | None:
+        """Known user by ``@username`` or numeric Telegram ID."""
+        query = query.strip()
+        async with self._uow_factory() as uow:
+            if query.lstrip("-").isdigit():
+                user = await uow.users.get_by_telegram_id(int(query))
+            else:
+                user = await uow.users.get_by_username(query)
+            return TelegramUserRead.model_validate(user) if user else None

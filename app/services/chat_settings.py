@@ -143,7 +143,7 @@ class ChatSettingsService:
         async with self._uow_factory() as uow:
             chat = await self._require(uow, telegram_chat_id, for_update=True)
             user = await uow.users.upsert(user_data, self._clock.now())
-            added = await self.assign_responsible(uow, chat, user, actor_id, source="command")
+            added = await self.assign_responsible(uow, chat, user, actor_id, source="menu")
             await uow.session.flush()
             result = MonitoredChatRead.model_validate(chat)
             await uow.commit()
@@ -239,17 +239,49 @@ class ChatSettingsService:
     async def get_details(self, telegram_chat_id: int) -> MonitoredChatDetails | None:
         async with self._uow_factory() as uow:
             chat = await uow.chats.get_by_telegram_id(telegram_chat_id)
-            if chat is None:
-                return None
-            responsible: TelegramUser | None = (
-                await uow.users.get(chat.responsible_user_id) if chat.responsible_user_id else None
+            return await self._details(uow, chat, full=False) if chat else None
+
+    async def get_card(self, chat_id: int) -> MonitoredChatDetails | None:
+        """Everything the settings menu shows for a chat (by internal ID)."""
+        async with self._uow_factory() as uow:
+            chat = await uow.chats.get(chat_id)
+            return await self._details(uow, chat, full=True) if chat else None
+
+    async def list_chats(self) -> list[MonitoredChatRead]:
+        async with self._uow_factory() as uow:
+            return [MonitoredChatRead.model_validate(c) for c in await uow.chats.list_all()]
+
+    @staticmethod
+    async def _details(uow: UnitOfWork, chat: MonitoredChat, *, full: bool) -> MonitoredChatDetails:
+        responsible: TelegramUser | None = (
+            await uow.users.get(chat.responsible_user_id) if chat.responsible_user_id else None
+        )
+        responders = await uow.responders.list_users(chat.id)
+        members = await uow.members.list_users(chat.id) if full else []
+        return MonitoredChatDetails(
+            chat=MonitoredChatRead.model_validate(chat),
+            responsible=TelegramUserRead.model_validate(responsible) if responsible else None,
+            responders=tuple(TelegramUserRead.model_validate(u) for u in responders),
+            members=tuple(TelegramUserRead.model_validate(u) for u in members),
+            open_tickets=await uow.pending.count_open(chat.id) if full else 0,
+        )
+
+    async def clear_responsible(self, telegram_chat_id: int, actor_id: int) -> None:
+        async with self._uow_factory() as uow:
+            chat = await self._require(uow, telegram_chat_id, for_update=True)
+            old_id = await self._responsible_tg_id(uow, chat)
+            if old_id is None:
+                return
+            chat.responsible_user_id = None
+            await self._audit.record_chat_change(
+                uow,
+                chat_id=chat.id,
+                actor_telegram_user_id=actor_id,
+                action=ChatConfigAction.RESPONSIBLE_CHANGED,
+                old_value={"responsible_telegram_id": old_id},
+                new_value={"responsible_telegram_id": None, "source": "menu"},
             )
-            responders = await uow.responders.list_users(chat.id)
-            return MonitoredChatDetails(
-                chat=MonitoredChatRead.model_validate(chat),
-                responsible=TelegramUserRead.model_validate(responsible) if responsible else None,
-                responders=tuple(TelegramUserRead.model_validate(u) for u in responders),
-            )
+            await uow.commit()
 
     @staticmethod
     async def _require(

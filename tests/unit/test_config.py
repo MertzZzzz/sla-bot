@@ -35,9 +35,6 @@ def test_admin_ids_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
     assert settings.telegram.admin_telegram_ids == frozenset({111, 222})
     assert settings.database.port == 6543
     assert settings.celery.scan_interval_seconds == 10
-    assert settings.is_global_admin(111)
-    assert not settings.is_global_admin(333)
-    assert not settings.is_global_admin(None)
 
 
 @pytest.mark.parametrize("raw", ["abc", "1,-5", "0"])
@@ -159,3 +156,15 @@ def test_proxy_secrets_hidden() -> None:
     assert "url-secret" not in dumped
     assert "'pw'" not in dumped
     assert settings.telegram.proxy_display == "socks5://10.0.0.1:1080"
+
+
+def test_admin_chats(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("APP_TELEGRAM__BOT_TOKEN", "1:secret")
+    monkeypatch.setenv("APP_TELEGRAM__ADMIN_CHAT_IDS", "-1001111, -2222")
+    settings = Settings(_env_file=None)
+    assert settings.telegram.admin_chat_ids == frozenset({-1001111, -2222})
+    assert settings.is_settings_chat(-1001111, "supergroup")
+    assert settings.is_settings_chat(42, "private")
+    assert not settings.is_settings_chat(-1009999, "supergroup")
+    with pytest.raises(ValidationError):
+        make_settings(admin_chat_ids="0")

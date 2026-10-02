@@ -14,6 +14,7 @@ from app.services.telegram_sender import DeliveryError
 from tests.factories import CHAT_ID, user
 
 ADMIN_ID = 1000
+ADMIN_CHAT_ID = -100500
 RESPONDER = user(2000, "Responder")
 CLIENT = user(3000, "Client")
 NOTIFY_CHAT = -100777

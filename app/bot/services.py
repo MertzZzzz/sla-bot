@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.core.config import Settings
 from app.db.uow import UnitOfWork
+from app.services.admins import AdminService
 from app.services.audit import AuditService
 from app.services.chat_settings import ChatSettingsService
 from app.services.clock import Clock, SystemClock
@@ -27,6 +28,7 @@ class BotServices:
     stats: StatsService
     users: TelegramUserService
     reassignment: ReassignmentService
+    admins: AdminService
 
 
 def build_bot_services(
@@ -53,4 +55,5 @@ def build_bot_services(
         stats=StatsService(uow_factory, clock),
         users=TelegramUserService(uow_factory, clock),
         reassignment=ReassignmentService(uow_factory, chats),
+        admins=AdminService(uow_factory, clock, settings.telegram.admin_telegram_ids),
     )

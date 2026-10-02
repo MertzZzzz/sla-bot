@@ -12,8 +12,10 @@ from typing import Self
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.orm import Session, sessionmaker
 
+from app.db.repositories.admins import AdminRepository
 from app.db.repositories.audit import AuditRepository, SyncAuditRepository
 from app.db.repositories.chats import (
+    ChatMemberRepository,
     MonitoredChatRepository,
     ResponderRepository,
     SyncMonitoredChatRepository,
@@ -29,9 +31,11 @@ class UnitOfWork:
     users: UserRepository
     chats: MonitoredChatRepository
     responders: ResponderRepository
+    members: ChatMemberRepository
     pending: PendingReplyRepository
     audit: AuditRepository
     stats: StatsRepository
+    admins: AdminRepository
 
     def __init__(self, session_factory: async_sessionmaker[AsyncSession]) -> None:
         self._session_factory = session_factory
@@ -41,9 +45,11 @@ class UnitOfWork:
         self.users = UserRepository(self.session)
         self.chats = MonitoredChatRepository(self.session)
         self.responders = ResponderRepository(self.session)
+        self.members = ChatMemberRepository(self.session)
         self.pending = PendingReplyRepository(self.session)
         self.audit = AuditRepository(self.session)
         self.stats = StatsRepository(self.session)
+        self.admins = AdminRepository(self.session)
         return self
 
     async def __aexit__(

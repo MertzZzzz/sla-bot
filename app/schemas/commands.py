@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-from pydantic import Field, ValidationError, field_validator
+import re
 
-from app.core.enums import Priority, ReplyMatchMode
+from pydantic import Field, ValidationError
+
 from app.core.types import SlaSeconds, TelegramChatId, ThreadId, TimezoneName
 from app.schemas.common import Schema
 
@@ -17,54 +18,45 @@ def _split(args: str | None) -> list[str]:
     return (args or "").split()
 
 
-class ChangeSlaCommand(Schema):
+_DURATION_UNITS: dict[str, int] = {
+    "d": 86400,
+    "д": 86400,
+    "дн": 86400,
+    "h": 3600,
+    "ч": 3600,
+    "m": 60,
+    "м": 60,
+    "мин": 60,
+    "min": 60,
+    "s": 1,
+    "с": 1,
+    "сек": 1,
+    "sec": 1,
+}
+_DURATION_TOKEN = re.compile(r"(\d+)\s*([a-zа-я]*)", re.IGNORECASE)
+
+
+class SlaInput(Schema):
+    """Free-form SLA: ``45`` (minutes), ``1h30m``, ``2ч``, ``90s``, ``1d``."""
+
     sla_seconds: SlaSeconds
 
     @classmethod
-    def parse(cls, args: str | None) -> ChangeSlaCommand:
-        parts = _split(args)
-        if len(parts) != 1 or not parts[0].isdigit():
-            raise CommandArgumentError("Использование: /chat_sla <секунды>, например /chat_sla 900")
+    def parse(cls, text: str | None) -> SlaInput:
+        usage = "Введите длительность: 45 (минут), 1ч 30м, 2h, 90s, 1d. Максимум 30 суток."
+        raw = (text or "").strip().lower().replace(",", " ")
+        tokens = _DURATION_TOKEN.findall(raw)
+        if not tokens or _DURATION_TOKEN.sub("", raw).strip():
+            raise CommandArgumentError(usage)
+        total = 0
+        for number, unit in tokens:
+            if unit and unit not in _DURATION_UNITS:
+                raise CommandArgumentError(usage)
+            total += int(number) * _DURATION_UNITS.get(unit, 60)
         try:
-            return cls(sla_seconds=int(parts[0]))
+            return cls(sla_seconds=total)
         except ValidationError as exc:
-            raise CommandArgumentError(
-                "SLA должен быть положительным числом секунд (не более 30 суток)"
-            ) from exc
-
-
-class ChangePriorityCommand(Schema):
-    priority: Priority
-
-    @field_validator("priority", mode="before")
-    @classmethod
-    def lower(cls, value: object) -> object:
-        return value.lower() if isinstance(value, str) else value
-
-    @classmethod
-    def parse(cls, args: str | None) -> ChangePriorityCommand:
-        parts = _split(args)
-        try:
-            if len(parts) != 1:
-                raise ValueError
-            return cls(priority=parts[0])  # type: ignore[arg-type]
-        except (ValidationError, ValueError) as exc:
-            raise CommandArgumentError("Использование: /chat_priority <p1|p2|p3|p4>") from exc
-
-
-class ChangeModeCommand(Schema):
-    mode: ReplyMatchMode
-
-    @classmethod
-    def parse(cls, args: str | None) -> ChangeModeCommand:
-        parts = _split(args)
-        try:
-            if len(parts) != 1:
-                raise ValueError
-            return cls(mode=parts[0].lower())  # type: ignore[arg-type]
-        except (ValidationError, ValueError) as exc:
-            modes = "|".join(m.value for m in ReplyMatchMode)
-            raise CommandArgumentError(f"Использование: /chat_mode <{modes}>") from exc
+            raise CommandArgumentError(usage) from exc
 
 
 class ChangeTimezoneCommand(Schema):
@@ -79,7 +71,7 @@ class ChangeTimezoneCommand(Schema):
             return cls(timezone=parts[0])
         except (ValidationError, ValueError) as exc:
             raise CommandArgumentError(
-                "Использование: /chat_timezone <IANA timezone>, например Europe/Moscow"
+                "Укажите часовой пояс IANA, например Europe/Moscow или Asia/Yekaterinburg"
             ) from exc
 
 
@@ -89,7 +81,7 @@ class SetNotificationCommand(Schema):
 
     @classmethod
     def parse(cls, args: str | None) -> SetNotificationCommand:
-        usage = "Использование: /chat_notification <notification_chat_id> [message_thread_id]"
+        usage = "Укажите chat_id и, при необходимости, ID топика: -1001234567890 42"
         parts = _split(args)
         if len(parts) not in (1, 2):
             raise CommandArgumentError(usage)

@@ -2,43 +2,44 @@ from __future__ import annotations
 
 import pytest
 
-from app.core.enums import Priority, ReplyMatchMode
 from app.schemas.callbacks import (
+    MenuAction,
+    MenuCallbackData,
     PendingReplyAction,
     PendingReplyCallbackData,
     ReassignAction,
     ReassignCallbackData,
 )
 from app.schemas.commands import (
-    ChangeModeCommand,
-    ChangePriorityCommand,
-    ChangeSlaCommand,
     ChangeTimezoneCommand,
     CommandArgumentError,
     SetNotificationCommand,
+    SlaInput,
     StatsCommand,
 )
 
 
-def test_sla_command() -> None:
-    assert ChangeSlaCommand.parse("900").sla_seconds == 900
-    for bad in (None, "", "0", "-5", "abc", "1 2", "99999999"):
-        with pytest.raises(CommandArgumentError):
-            ChangeSlaCommand.parse(bad)
+@pytest.mark.parametrize(
+    ("text", "seconds"),
+    [
+        ("45", 2700),
+        ("1ч 30м", 5400),
+        ("1h30m", 5400),
+        ("2h", 7200),
+        ("90s", 90),
+        ("15 мин", 900),
+        ("1d", 86400),
+        ("30д", 30 * 86400),
+    ],
+)
+def test_sla_input(text: str, seconds: int) -> None:
+    assert SlaInput.parse(text).sla_seconds == seconds
 
 
-def test_priority_command() -> None:
-    assert ChangePriorityCommand.parse("P1").priority is Priority.P1
-    assert ChangePriorityCommand.parse("p4").priority is Priority.P4
-    for bad in (None, "p5", "high", "p1 p2"):
-        with pytest.raises(CommandArgumentError):
-            ChangePriorityCommand.parse(bad)
-
-
-def test_mode_command() -> None:
-    assert ChangeModeCommand.parse("reply_only").mode is ReplyMatchMode.REPLY_ONLY
-    with pytest.raises(CommandArgumentError, match="any_responder_message"):
-        ChangeModeCommand.parse("whatever")
+@pytest.mark.parametrize("text", [None, "", "0", "abc", "1x", "31d", "5 минут назад", "-5"])
+def test_sla_input_invalid(text: str | None) -> None:
+    with pytest.raises(CommandArgumentError):
+        SlaInput.parse(text)
 
 
 def test_timezone_command() -> None:
@@ -95,3 +96,14 @@ def test_reassign_callback_data() -> None:
         12,
         345,
     )
+
+
+def test_menu_callback_data_fits_telegram_limit() -> None:
+    longest = MenuCallbackData(
+        a=MenuAction.TIMEZONE_SET, i=2**63 - 1, v="America/Argentina/ComodRivadavia", p=999
+    ).pack()
+    assert len(longest.encode()) < 64
+    user = MenuCallbackData(a=MenuAction.RESPONDER_TOGGLE, i=2**63 - 1, v=str(2**63 - 1), p=99)
+    assert len(user.pack().encode()) < 64
+    parsed = MenuCallbackData.unpack("m:ss:3:900:0")
+    assert (parsed.a, parsed.i, parsed.v, parsed.p) == (MenuAction.SLA_SET, 3, "900", 0)

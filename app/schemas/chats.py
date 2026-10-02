@@ -62,6 +62,18 @@ class MonitoredChatDetails(Schema):
     chat: MonitoredChatRead
     responsible: TelegramUserRead | None
     responders: tuple[TelegramUserRead, ...]
+    # Known participants (most recent first) and currently open tickets; filled for the
+    # settings menu, empty/zero elsewhere.
+    members: tuple[TelegramUserRead, ...] = ()
+    open_tickets: int = 0
+
+    def candidates(self) -> list[TelegramUserRead]:
+        """People to offer in pickers: participants plus current responders/responsible."""
+        seen: dict[int, TelegramUserRead] = {}
+        extra = (self.responsible,) if self.responsible else ()
+        for user in (*self.members, *self.responders, *extra):
+            seen.setdefault(user.telegram_user_id, user)
+        return list(seen.values())
 
 
 class ResponderAddRequest(Schema):
