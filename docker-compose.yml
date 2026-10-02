@@ -1,0 +1,103 @@
+name: telegram-sla-bot
+
+x-app: &app
+  build: .
+  image: telegram-sla-bot:latest
+  env_file: .env
+  restart: unless-stopped
+  depends_on:
+    postgres:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+    migrations:
+      condition: service_completed_successfully
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${APP_DATABASE__NAME:-telegram_sla_bot}
+      POSTGRES_USER: ${APP_DATABASE__USER:-telegram_sla_bot}
+      POSTGRES_PASSWORD: ${APP_DATABASE__PASSWORD:?set APP_DATABASE__PASSWORD in .env}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    # Redis is only a broker: SLA deadlines live in PostgreSQL.
+    command: ["sh", "-c", "exec redis-server --appendonly no $${REDIS_PASSWORD:+--requirepass $$REDIS_PASSWORD}"]
+    environment:
+      REDIS_PASSWORD: ${APP_REDIS__PASSWORD:-}
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli $${REDIS_PASSWORD:+-a $$REDIS_PASSWORD} --no-auth-warning ping | grep PONG"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  migrations:
+    build: .
+    image: telegram-sla-bot:latest
+    env_file: .env
+    command: ["alembic", "upgrade", "head"]
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  bot:
+    <<: *app
+    command: ["python", "-m", "app.bot"]
+    ports:
+      - "${BOT_HTTP_PUBLISH:-127.0.0.1:8080}:8080"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8080/health/live', timeout=3).status == 200 else 1)"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  celery-worker:
+    <<: *app
+    command:
+      - celery
+      - -A
+      - app.workers.celery_app:celery_app
+      - worker
+      - --queues=default,notifications,maintenance
+      - --concurrency=4
+      - --loglevel=INFO
+    healthcheck:
+      test: ["CMD-SHELL", "celery -A app.workers.celery_app:celery_app inspect ping -d celery@$$HOSTNAME --timeout 5 | grep -q pong"]
+      interval: 30s
+      timeout: 15s
+      retries: 3
+
+  celery-beat:
+    <<: *app
+    command:
+      - celery
+      - -A
+      - app.workers.celery_app:celery_app
+      - beat
+      - --loglevel=INFO
+      - --schedule=/tmp/celerybeat-schedule
+
+  flower:
+    profiles: ["debug"]
+    image: mher/flower:2.0
+    command: ["celery", "--broker=redis://redis:6379/0", "flower", "--port=5555"]
+    ports:
+      - "127.0.0.1:5555:5555"
+    depends_on:
+      redis:
+        condition: service_healthy
+
+volumes:
+  postgres-data:
