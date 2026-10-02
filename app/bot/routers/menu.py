@@ -20,6 +20,7 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import CallbackQuery, Message, ReplyKeyboardRemove
 
 from app.bot import menus
+from app.bot.chat_link import ensure_chat_link
 from app.bot.chat_target import TargetError, resolve_target
 from app.bot.extractors import user_data
 from app.bot.filters.is_global_admin import IsGlobalAdmin
@@ -361,6 +362,10 @@ async def chat_card(ctx: Ctx) -> Screen:
     details = await _card(ctx)
     if details is None:
         return await chats_list(ctx)
+    if details.chat.chat_link is None and await ensure_chat_link(
+        ctx.bot, ctx.services, details.chat
+    ):
+        details = await _card(ctx) or details  # picked up a link (e.g. bot became admin)
     return menus.chat_screen(details)
 
 

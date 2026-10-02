@@ -22,7 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.bot.services import BotServices, build_bot_services
-from app.core.config import CelerySettings, Settings, TelegramSettings
+from app.core.config import AppSettings, CelerySettings, Settings, TelegramSettings
 from app.db.uow import SyncUnitOfWork
 from tests.factories import FakeClock
 
@@ -100,6 +100,9 @@ def settings() -> Settings:
             admin_chat_ids=frozenset({ADMIN_CHAT_ID}),
         ),
         celery=CelerySettings(retry_backoff_base_seconds=5, max_delivery_attempts=3),
+        # Most scenarios start from an empty responder list; the default (admins become
+        # responders of new chats) is covered in test_chat_defaults.py.
+        app=AppSettings(admins_as_default_responders=False),
     )
 
 

@@ -35,6 +35,8 @@ class AppSettings(BaseModel):
     # Consecutive messages of one author (while their ticket is open, in the same topic)
     # join that ticket instead of opening new ones: one answer closes them all.
     merge_consecutive_messages: bool = True
+    # A newly added chat gets all global admins as responders (removable in the menu).
+    admins_as_default_responders: bool = True
     # Assigning a responsible also adds them to the chat responders.
     auto_add_responsible_as_responder: bool = True
     # One HTTP server serves /health/* and, in webhook mode, the Telegram webhook.

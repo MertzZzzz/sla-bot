@@ -50,7 +50,9 @@ def build_bot_services(
         responsible_can_mark_not_required=settings.app.responsible_can_mark_not_required,
         merge_consecutive_messages=settings.app.merge_consecutive_messages,
     )
-    chats = ChatSettingsService(uow_factory, clock, AuditService(), settings.app)
+    chats = ChatSettingsService(
+        uow_factory, clock, AuditService(), settings.app, settings.telegram.admin_telegram_ids
+    )
     return BotServices(
         messages=MessageProcessingService(uow_factory, pending, clock),
         pending=pending,

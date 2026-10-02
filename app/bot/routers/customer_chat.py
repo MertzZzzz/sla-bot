@@ -15,6 +15,7 @@ from aiogram.exceptions import TelegramAPIError
 from aiogram.filters import Command
 from aiogram.types import Message
 
+from app.bot.chat_link import ensure_chat_link
 from app.bot.extractors import GROUP_TYPES
 from app.bot.filters.is_global_admin import IsGlobalAdmin
 from app.bot.invites import format_invite_report, invite_pilot
@@ -42,9 +43,14 @@ async def cmd_chat_add(
         return
     actor = message.from_user
     created, chat = await services.chats.add_chat(
-        message.chat.id, message.chat.title or "", ChatType(message.chat.type), actor.id
+        message.chat.id,
+        message.chat.title or "",
+        ChatType(message.chat.type),
+        actor.id,
+        username=message.chat.username,
     )
     await _try_delete(message)
+    await ensure_chat_link(bot, services, chat)
     details = await services.chats.get_card(chat.id)
     assert details is not None
     who = escape(actor.full_name)

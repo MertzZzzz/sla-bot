@@ -23,7 +23,8 @@ def test_render_contains_required_fields() -> None:
     rendered = render_notification(payload(), now)
     text = rendered.text
     assert text.startswith("🔴 <b>SLA нарушен</b>")
-    assert "Чат: <b>Поддержка VIP</b>" in text
+    # The chat title links to the chat (falls back to the message link).
+    assert 'Чат: <a href="https://t.me/c/1234567890/10"><b>Поддержка VIP</b></a>' in text
     assert "Приоритет: P1" in text
     assert "SLA: 15 мин" in text
     assert 'Ответственный: <a href="tg://user?id=2000">Иван Иванов</a>' in text
@@ -114,3 +115,12 @@ def test_render_merged_messages() -> None:
     assert "Последнее:" not in single
     huge = payload(message_count=2, source_text="&" * 5000, last_message_text="<" * 5000)
     assert len(render_notification(huge, T0).text) <= TELEGRAM_MESSAGE_LIMIT
+
+
+def test_chat_title_links_to_chat() -> None:
+    linked = render_notification(payload(chat_link="https://t.me/+AbCdEf"), T0).text
+    assert 'Чат: <a href="https://t.me/+AbCdEf"><b>Поддержка VIP</b></a>' in linked
+    plain = render_notification(payload(chat_link=None, message_link=None), T0).text
+    assert "Чат: <b>Поддержка VIP</b>" in plain
+    escaped = render_notification(payload(chat_link='https://t.me/x"><script>'), T0).text
+    assert "<script>" not in escaped

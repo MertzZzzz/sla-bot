@@ -37,6 +37,10 @@ class MessageProcessingService:
                     return MessageProcessingResult(action="ignored", reason="monitoring disabled")
                 if chat.title != msg.chat_title:
                     chat.title = msg.chat_title
+                if msg.chat_username and chat.chat_username != msg.chat_username:
+                    # Became public (or renamed): the public link is the best one.
+                    chat.chat_username = msg.chat_username
+                    chat.chat_link = f"https://t.me/{msg.chat_username}"
                 user = await uow.users.upsert(msg.author, now)
                 await uow.members.touch(chat.id, user.id, now)
                 if await uow.responders.is_responder(chat.id, user.id):

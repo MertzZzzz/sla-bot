@@ -40,7 +40,9 @@ from tests.factories import T0
 BOT_USER = User(id=777, is_bot=True, first_name="SLA", username="sla_test_bot")
 
 
-def visible_chat(chat_id: int, title: str, *, forum: bool = False) -> ChatFullInfo:
+def visible_chat(
+    chat_id: int, title: str, *, forum: bool = False, username: str | None = None
+) -> ChatFullInfo:
     # model_construct: the fake API needs only a few fields, and the list of required
     # ChatFullInfo fields changes between aiogram releases.
     return ChatFullInfo.model_construct(  # type: ignore[call-arg]
@@ -48,6 +50,7 @@ def visible_chat(chat_id: int, title: str, *, forum: bool = False) -> ChatFullIn
         type="supergroup" if str(chat_id).startswith("-100") else "group",
         title=title,
         is_forum=forum or None,
+        username=username,
     )
 
 

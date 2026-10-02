@@ -60,14 +60,22 @@ class ChatSettingsService:
         clock: Clock,
         audit: AuditService,
         defaults: AppSettings,
+        env_admin_ids: frozenset[int] = frozenset(),
     ) -> None:
         self._uow_factory = uow_factory
         self._clock = clock
         self._audit = audit
         self._defaults = defaults
+        self._env_admin_ids = env_admin_ids
 
     async def add_chat(
-        self, telegram_chat_id: int, title: str, chat_type: ChatType, actor_id: int
+        self,
+        telegram_chat_id: int,
+        title: str,
+        chat_type: ChatType,
+        actor_id: int,
+        *,
+        username: str | None = None,
     ) -> tuple[bool, MonitoredChatRead]:
         """Start monitoring a chat with default settings. Returns ``(created, chat)``."""
         data = MonitoredChatCreate(
@@ -92,9 +100,41 @@ class ChatSettingsService:
                     action=ChatConfigAction.CHAT_ADDED,
                     new_value=data.model_dump(mode="json"),
                 )
+                if self._defaults.admins_as_default_responders:
+                    await self._add_admins_as_responders(uow, chat, actor_id)
+            if username and chat.chat_username != username:
+                chat.chat_username = username
+                chat.chat_link = f"https://t.me/{username}"
+            await uow.session.flush()
             result = MonitoredChatRead.model_validate(chat)
             await uow.commit()
         return created, result
+
+    async def _add_admins_as_responders(
+        self, uow: UnitOfWork, chat: MonitoredChat, actor_id: int
+    ) -> None:
+        """New chats start with every global admin as a responder (removable in the menu)."""
+        admin_ids = self._env_admin_ids | {a.telegram_user_id for a in await uow.admins.list_all()}
+        added = []
+        for telegram_id in sorted(admin_ids):
+            user = await uow.users.ensure(telegram_id)
+            if await uow.responders.add(chat.id, user.id, actor_id):
+                added.append(telegram_id)
+        if added:
+            await self._audit.record_chat_change(
+                uow,
+                chat_id=chat.id,
+                actor_telegram_user_id=actor_id,
+                action=ChatConfigAction.RESPONDER_ADDED,
+                new_value={"telegram_user_ids": added, "source": "admins_by_default"},
+            )
+
+    async def set_chat_link(self, chat_id: int, link: str) -> None:
+        async with self._uow_factory() as uow:
+            chat = await uow.chats.get(chat_id, for_update=True)
+            if chat is not None and chat.chat_link != link:
+                chat.chat_link = link
+                await uow.commit()
 
     async def update(
         self, telegram_chat_id: int, changes: MonitoredChatUpdate, actor_id: int

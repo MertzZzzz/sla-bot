@@ -75,7 +75,7 @@ def render_notification(payload: NotificationPayload, now: datetime) -> Rendered
         [
             "🔴 <b>SLA нарушен</b>",
             "",
-            f"Чат: <b>{escape_truncated(payload.chat_title, 256)}</b>",
+            f"Чат: {_chat_title_html(payload)}",
             f"Приоритет: {payload.priority.label}",
             f"SLA: {format_duration(payload.sla_seconds)}",
             f"Ответственный: {responsible}",
@@ -106,6 +106,13 @@ def render_notification(payload: NotificationPayload, now: datetime) -> Rendered
     return RenderedNotification(
         text=text, target_chat_id=payload.target_chat_id, target_thread_id=payload.target_thread_id
     )
+
+
+def _chat_title_html(payload: NotificationPayload) -> str:
+    """Chat title as a link: the chat link, else the message link (opens the chat too)."""
+    title = f"<b>{escape_truncated(payload.chat_title, 256)}</b>"
+    href = payload.chat_link or payload.message_link
+    return f'<a href="{escape(href)}">{title}</a>' if href else title
 
 
 def not_required_line(user_name: str, user_telegram_id: int) -> str:
@@ -240,6 +247,7 @@ class NotificationService:
                     update={
                         "target_chat_id": chat.notification_chat_id,
                         "target_thread_id": chat.notification_thread_id,
+                        "chat_link": chat.chat_link or payload.chat_link,
                     }
                 )
             attempt = event.attempts

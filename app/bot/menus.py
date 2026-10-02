@@ -276,6 +276,13 @@ def chat_text(details: MonitoredChatDetails) -> str:
             f"Часовой пояс: {escape(chat.timezone)}",
             f"Ответственный: {user_html(details.responsible)}",
             f"Отвечающие ({len(details.responders)}): {responders}",
+            "Ссылка на чат: "
+            + (
+                f'<a href="{escape(chat.chat_link)}">открыть</a>'
+                if chat.chat_link
+                else f"{NOT_SET} (сделайте бота админом с правом приглашать — "
+                "ссылка появится в уведомлениях)"
+            ),
             *_notification_lines(chat),
             *_delivery_error_lines(details),
             f"Открытых ожиданий: {details.open_tickets}",

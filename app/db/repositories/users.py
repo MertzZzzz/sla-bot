@@ -41,6 +41,17 @@ class UserRepository:
         result = await self._session.scalars(stmt, execution_options={"populate_existing": True})
         return result.one()
 
+    async def ensure(self, telegram_user_id: int) -> TelegramUser:
+        """Existing user or a bare row with just the ID (names arrive when they write)."""
+        await self._session.execute(
+            insert(TelegramUser)
+            .values(telegram_user_id=telegram_user_id)
+            .on_conflict_do_nothing(index_elements=[TelegramUser.telegram_user_id])
+        )
+        user = await self.get_by_telegram_id(telegram_user_id)
+        assert user is not None
+        return user
+
     async def get_by_telegram_id(self, telegram_user_id: int) -> TelegramUser | None:
         user: TelegramUser | None = await self._session.scalar(
             select(TelegramUser).where(TelegramUser.telegram_user_id == telegram_user_id)

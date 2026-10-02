@@ -45,6 +45,8 @@ class MonitoredChatRead(Schema):
     id: int
     telegram_chat_id: int
     title: str
+    chat_username: str | None = None
+    chat_link: str | None = None
     chat_type: ChatType
     is_enabled: bool
     priority: Priority

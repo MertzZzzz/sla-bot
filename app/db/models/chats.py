@@ -16,6 +16,10 @@ class MonitoredChat(TimestampMixin, Base):
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     telegram_chat_id: Mapped[int] = mapped_column(BigInteger, unique=True, nullable=False)
     title: Mapped[str] = mapped_column(String(256), nullable=False)
+    # Public @username of the chat (if any) and a link that opens it, used in
+    # notifications: t.me/<username> or an invite link created by the bot.
+    chat_username: Mapped[str | None] = mapped_column(String(64))
+    chat_link: Mapped[str | None] = mapped_column(String(256))
     chat_type: Mapped[ChatType] = mapped_column(pg_enum(ChatType, "chat_type"), nullable=False)
     is_enabled: Mapped[bool] = mapped_column(default=True, server_default="true", nullable=False)
     priority: Mapped[Priority] = mapped_column(pg_enum(Priority, "chat_priority"), nullable=False)

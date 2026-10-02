@@ -99,6 +99,7 @@ class SlaService:
             source_message_date=ticket.source_message_date,
             deadline_at=ticket.deadline_at,
             message_link=ticket.source_message_link,
+            chat_link=chat.chat_link,
             timezone=chat.timezone,
             message_count=ticket.message_count,
             last_message_text=ticket.last_message_text,

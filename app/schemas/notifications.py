@@ -30,6 +30,7 @@ class NotificationPayload(Schema):
     deadline_at: datetime
     message_link: str | None
     timezone: str
+    chat_link: str | None = None
     # Follow-up messages merged into the ticket (defaults keep old payloads valid).
     message_count: int = 1
     last_message_text: str | None = None
