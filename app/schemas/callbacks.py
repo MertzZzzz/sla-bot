@@ -54,6 +54,8 @@ class MenuAction(StrEnum):
     # chats
     CHATS = "cl"
     CHAT = "cc"
+    CHAT_ADD_PICK = "ap"  # native group picker
+    CHAT_ADD_CONFIRM = "aq"  # v=<telegram chat id>, p=<topic id or 0 for the whole group>
     ENABLE = "en"
     PRIORITY = "pm"
     PRIORITY_SET = "ps"

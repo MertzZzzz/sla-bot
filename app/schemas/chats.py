@@ -18,6 +18,8 @@ from app.schemas.users import TelegramUserRead
 
 class MonitoredChatCreate(Schema):
     telegram_chat_id: TelegramChatId
+    thread_id: ThreadId = None
+    topic_name: str | None = Field(default=None, max_length=128)
     title: str = Field(min_length=1, max_length=256)
     chat_type: ChatType
     priority: Priority
@@ -44,6 +46,8 @@ class MonitoredChatUpdate(Schema):
 class MonitoredChatRead(Schema):
     id: int
     telegram_chat_id: int
+    thread_id: int | None = None
+    topic_name: str | None = None
     title: str
     chat_username: str | None = None
     chat_link: str | None = None

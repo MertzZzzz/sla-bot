@@ -87,3 +87,21 @@ def extract_incoming(message: Message, update_id: int | None = None) -> Incoming
         text=text,
         content_type=content_type,
     )
+
+
+def topic_of(message: Message) -> tuple[int, str | None] | None:
+    """``(thread_id, topic name if known)`` for a message inside a forum topic.
+
+    Names come from the topic's service messages: every message in a topic carries the
+    topic-creation message as ``reply_to_message`` (unless it replies to something else).
+    """
+    if not message.is_topic_message or message.message_thread_id is None:
+        return None
+    name: str | None = None
+    if message.forum_topic_created is not None:
+        name = message.forum_topic_created.name
+    elif message.forum_topic_edited is not None and message.forum_topic_edited.name:
+        name = message.forum_topic_edited.name
+    elif message.reply_to_message is not None and message.reply_to_message.forum_topic_created:
+        name = message.reply_to_message.forum_topic_created.name
+    return message.message_thread_id, name

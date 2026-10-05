@@ -13,16 +13,17 @@ from datetime import UTC, datetime
 from aiogram import Bot, Router
 from aiogram.exceptions import TelegramAPIError
 from aiogram.filters import Command
-from aiogram.types import Message
+from aiogram.types import Message, User
 
 from app.bot.chat_link import ensure_chat_link
-from app.bot.extractors import GROUP_TYPES
+from app.bot.extractors import GROUP_TYPES, topic_of
 from app.bot.filters.is_global_admin import IsGlobalAdmin
 from app.bot.invites import format_invite_report, invite_pilot
 from app.bot.menus import chat_screen
 from app.bot.services import BotServices
 from app.core.config import Settings
 from app.core.enums import ChatType
+from app.schemas.chats import MonitoredChatRead
 from app.services.formatting import escape
 
 logger = logging.getLogger(__name__)
@@ -42,14 +43,44 @@ async def cmd_chat_add(
         )
         return
     actor = message.from_user
+    thread_id, topic_name = await _topic(message, services)
     created, chat = await services.chats.add_chat(
         message.chat.id,
         message.chat.title or "",
         ChatType(message.chat.type),
         actor.id,
         username=message.chat.username,
+        thread_id=thread_id,
+        topic_name=topic_name,
     )
     await _try_delete(message)
+    delivered = await announce_chat(bot, services, chat, actor, created=created)
+    if not delivered:
+        # The admin has not started the bot yet: leave a short hint in the group.
+        await message.answer(GROUP_HINT)
+
+
+async def _topic(message: Message, services: BotServices) -> tuple[int | None, str | None]:
+    """/chat_add inside a forum topic monitors only that topic."""
+    topic = topic_of(message)
+    if topic is None:
+        return None, None
+    thread_id, name = topic
+    if name:
+        await services.chats.remember_topic(message.chat.id, thread_id, name)
+    return thread_id, name or await services.chats.topic_name(message.chat.id, thread_id)
+
+
+async def announce_chat(
+    bot: Bot,
+    services: BotServices,
+    chat: MonitoredChatRead,
+    actor: User,
+    *,
+    created: bool,
+    send_to_actor: bool = True,
+) -> bool:
+    """Send the chat card to the admin (and others for new chats); True if the admin got it."""
     await ensure_chat_link(bot, services, chat)
     details = await services.chats.get_card(chat.id)
     assert details is not None
@@ -61,7 +92,7 @@ async def cmd_chat_add(
         else "ℹ️ Этот чат уже подключён. Текущие настройки:"
     )
     screen = chat_screen(details, notice=notice)
-    recipients = [actor.id]
+    recipients = [actor.id] if send_to_actor else []
     if created:
         recipients += [a for a in await services.admins.new_chat_recipients() if a != actor.id]
     delivered_to_actor = False
@@ -78,9 +109,7 @@ async def cmd_chat_add(
                     "error_type": type(exc).__name__,
                 },
             )
-    if not delivered_to_actor:
-        # The admin has not started the bot yet: leave a short hint in the group.
-        await message.answer(GROUP_HINT)
+    return delivered_to_actor
 
 
 async def _try_delete(message: Message) -> None:
@@ -102,7 +131,8 @@ async def cmd_invite_all(
         return
     await _try_delete(message)
     actor = message.from_user.id
-    details = await services.chats.get_details(message.chat.id)
+    topic = topic_of(message)
+    details = await services.chats.get_for_message(message.chat.id, topic[0] if topic else None)
     if details is None:
         chunks = ["Этот чат ещё не подключён: сначала выполните в нём /chat_add."]
     else:

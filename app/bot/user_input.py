@@ -57,9 +57,10 @@ def pick_user_keyboard(max_quantity: int = 1) -> ReplyKeyboardMarkup:
 
 PICK_CHAT_TEXT = "👥 Выбрать группу"
 PICK_CHAT_REQUEST_ID = 2
+PICK_CUSTOMER_CHAT_REQUEST_ID = 3
 
 
-def pick_chat_keyboard() -> ReplyKeyboardMarkup:
+def pick_chat_keyboard(request_id: int = PICK_CHAT_REQUEST_ID) -> ReplyKeyboardMarkup:
     """Native Telegram group picker (private chat only): the bot gets the exact chat ID."""
     return ReplyKeyboardMarkup(
         keyboard=[
@@ -67,7 +68,7 @@ def pick_chat_keyboard() -> ReplyKeyboardMarkup:
                 KeyboardButton(
                     text=PICK_CHAT_TEXT,
                     request_chat=KeyboardButtonRequestChat(
-                        request_id=PICK_CHAT_REQUEST_ID,
+                        request_id=request_id,
                         chat_is_channel=False,
                         bot_is_member=True,
                         request_title=True,

@@ -17,21 +17,23 @@ from aiogram.exceptions import TelegramAPIError, TelegramBadRequest
 from aiogram.filters import Command, CommandStart, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from aiogram.types import CallbackQuery, Message, ReplyKeyboardRemove
+from aiogram.types import CallbackQuery, Message, ReplyKeyboardRemove, User
 
 from app.bot import menus
 from app.bot.chat_link import ensure_chat_link
-from app.bot.chat_target import TargetError, resolve_target
+from app.bot.chat_target import ResolvedTarget, TargetError, resolve_target
 from app.bot.extractors import user_data
 from app.bot.filters.is_global_admin import IsGlobalAdmin
 from app.bot.filters.settings_context import IsSettingsChat
 from app.bot.invites import format_invite_report, invite_pilot
 from app.bot.menus import Screen
+from app.bot.routers.customer_chat import announce_chat
 from app.bot.services import BotServices
 from app.bot.texts import HELP_TEXT, NOT_ADMIN_PRIVATE, PILOT_WELCOME
 from app.bot.user_input import (
     MAX_SHARED_USERS,
     PEOPLE_USAGE,
+    PICK_CUSTOMER_CHAT_REQUEST_ID,
     USAGE,
     UserInputError,
     from_read,
@@ -41,7 +43,7 @@ from app.bot.user_input import (
     resolve_user,
 )
 from app.core.config import Settings
-from app.core.enums import Priority, ReplyMatchMode
+from app.core.enums import ChatType, Priority, ReplyMatchMode
 from app.core.types import validate_timezone
 from app.schemas.callbacks import MenuAction as A
 from app.schemas.callbacks import MenuCallbackData
@@ -62,6 +64,7 @@ router.message.filter(IsSettingsChat())
 
 
 class MenuInput(StatesGroup):
+    add_chat = State()
     pilot = State()
     sla = State()
     timezone = State()
@@ -347,7 +350,64 @@ async def invite_run(ctx: Ctx) -> Screen:
 
 @on(A.CHATS)
 async def chats_list(ctx: Ctx) -> Screen:
-    return menus.chats_screen(await ctx.services.chats.list_chats(), ctx.data.p)
+    private = ctx.message.chat.type == "private"
+    return menus.chats_screen(await ctx.services.chats.list_chats(), ctx.data.p, private=private)
+
+
+@on(A.CHAT_ADD_PICK)
+async def chat_add_pick(ctx: Ctx) -> Screen:
+    await ctx.message.answer(
+        "👇 Выбор группы заказчика",
+        reply_markup=pick_chat_keyboard(PICK_CUSTOMER_CHAT_REQUEST_ID),
+    )
+    return await _prompt(
+        ctx,
+        MenuInput.add_chat,
+        "➕ <b>Подключить чат заказчика</b>\n\nНажмите «👥 Выбрать группу» внизу экрана и "
+        "выберите группу, где уже есть бот. Если это форум — затем выберите тему или весь чат.",
+        cancel_to=A.CHATS,
+        reply_kb=True,
+    )
+
+
+@on(A.CHAT_ADD_CONFIRM)
+async def chat_add_confirm(ctx: Ctx) -> Screen:
+    thread_id = ctx.data.p or None
+    try:
+        target = await resolve_target(ctx.bot, int(ctx.data.v), None)
+    except (TargetError, ValueError) as exc:
+        ctx.toast, ctx.alert = str(exc)[:190], True
+        return await chats_list(ctx)
+    screen, _ = await _connect_chat(
+        ctx.bot, ctx.services, target, ctx.callback.from_user, thread_id=thread_id
+    )
+    return screen
+
+
+async def _connect_chat(
+    bot: Bot,
+    services: BotServices,
+    target: ResolvedTarget,
+    actor: User,
+    *,
+    thread_id: int | None,
+) -> tuple[Screen, bool]:
+    """Add a picked group/topic as a customer chat and return its card."""
+    topic_name = await services.chats.topic_name(target.chat_id, thread_id) if thread_id else None
+    created, chat = await services.chats.add_chat(
+        target.chat_id,
+        target.title,
+        ChatType(target.chat_type),
+        actor.id,
+        username=target.username,
+        thread_id=thread_id,
+        topic_name=topic_name,
+    )
+    await announce_chat(bot, services, chat, actor, created=created, send_to_actor=False)
+    details = await services.chats.get_card(chat.id)
+    assert details is not None
+    notice = "✅ Чат подключён к мониторингу." if created else "ℹ️ Этот чат уже подключён."
+    return menus.chat_screen(details, notice=notice), created
 
 
 async def _card(ctx: Ctx) -> MonitoredChatDetails | None:
@@ -373,7 +433,9 @@ async def _update(ctx: Ctx, changes: MonitoredChatUpdate, toast: str) -> Screen:
     details = await _card(ctx)
     if details is None:
         return await chats_list(ctx)
-    await ctx.services.chats.update(details.chat.telegram_chat_id, changes, ctx.actor_id)
+    await ctx.services.chats.update(
+        details.chat.telegram_chat_id, changes, ctx.actor_id, thread_id=details.chat.thread_id
+    )
     ctx.toast = toast
     return await chat_card(ctx)
 
@@ -471,7 +533,7 @@ async def open_tickets(ctx: Ctx) -> Screen:
     details = await _card(ctx)
     if details is None:
         return await chats_list(ctx)
-    tickets = await ctx.services.pending.list_open(details.chat.telegram_chat_id)
+    tickets = await ctx.services.pending.list_open(details.chat.id)
     return menus.open_tickets_screen(details, tickets)
 
 
@@ -510,7 +572,9 @@ async def responsible_set(ctx: Ctx) -> Screen:
     if user is None:  # stale button or forged callback
         ctx.toast = "Пользователь не найден среди участников чата."
         return menus.responsible_screen(details, 0)
-    await ctx.services.chats.set_responsible(details.chat.telegram_chat_id, user, ctx.actor_id)
+    await ctx.services.chats.set_responsible(
+        details.chat.telegram_chat_id, user, ctx.actor_id, thread_id=details.chat.thread_id
+    )
     ctx.toast = f"Ответственный: {user.display_name}"
     return await chat_card(ctx)
 
@@ -520,7 +584,9 @@ async def responsible_clear(ctx: Ctx) -> Screen:
     details = await _card(ctx)
     if details is None:
         return await chats_list(ctx)
-    await ctx.services.chats.clear_responsible(details.chat.telegram_chat_id, ctx.actor_id)
+    await ctx.services.chats.clear_responsible(
+        details.chat.telegram_chat_id, ctx.actor_id, thread_id=details.chat.thread_id
+    )
     ctx.toast = "Ответственный снят"
     return await chat_card(ctx)
 
@@ -537,10 +603,14 @@ async def responder_toggle(ctx: Ctx) -> Screen:
     chat_tg = details.chat.telegram_chat_id
     is_responder = any(u.telegram_user_id == user.telegram_user_id for u in details.responders)
     if is_responder:
-        await ctx.services.chats.remove_responder(chat_tg, user, ctx.actor_id)
+        await ctx.services.chats.remove_responder(
+            chat_tg, user, ctx.actor_id, thread_id=details.chat.thread_id
+        )
         ctx.toast = f"{user.display_name} больше не отвечающий"
     else:
-        await ctx.services.chats.add_responder(chat_tg, user, ctx.actor_id)
+        await ctx.services.chats.add_responder(
+            chat_tg, user, ctx.actor_id, thread_id=details.chat.thread_id
+        )
         ctx.toast = f"{user.display_name} — отвечающий"
     return await responders(ctx)
 
@@ -681,7 +751,12 @@ async def _chat_updated(
     details = await _input_chat(message, state, services)
     if details is None or message.from_user is None:
         return
-    await services.chats.update(details.chat.telegram_chat_id, changes, message.from_user.id)
+    await services.chats.update(
+        details.chat.telegram_chat_id,
+        changes,
+        message.from_user.id,
+        thread_id=details.chat.thread_id,
+    )
     fresh = await services.chats.get_card(details.chat.id)
     assert fresh is not None
     await _finish(message, state, bot, menus.chat_screen(fresh, notice=notice))
@@ -773,10 +848,14 @@ async def input_user(message: Message, state: FSMContext, services: BotServices,
         return
     chat_tg = details.chat.telegram_chat_id
     if current == MenuInput.responsible.state:
-        await services.chats.set_responsible(chat_tg, user, message.from_user.id)
+        await services.chats.set_responsible(
+            chat_tg, user, message.from_user.id, thread_id=details.chat.thread_id
+        )
         notice = f"✅ Ответственный: {escape(user.display_name)}"
     else:
-        change = await services.chats.add_responder(chat_tg, user, message.from_user.id)
+        change = await services.chats.add_responder(
+            chat_tg, user, message.from_user.id, thread_id=details.chat.thread_id
+        )
         verb = "добавлен в отвечающие" if change.changed else "уже среди отвечающих"
         notice = f"✅ {escape(user.display_name)} {verb}"
     fresh = await services.chats.get_card(details.chat.id)
@@ -823,4 +902,38 @@ async def input_pilot(message: Message, state: FSMContext, services: BotServices
     screen = menus.pilot_screen(
         await services.pilot.list_all(), 0, notice="\n".join(notice_lines) or None
     )
+    await _finish(message, state, bot, screen)
+
+
+@router.message(StateFilter(MenuInput.add_chat), IsGlobalAdmin(), NOT_COMMAND)
+async def input_add_chat(
+    message: Message, state: FSMContext, services: BotServices, settings: Settings, bot: Bot
+) -> None:
+    shared = message.chat_shared
+    if shared is None or message.from_user is None:
+        await message.reply("Нажмите кнопку «👥 Выбрать группу» внизу экрана или /cancel.")
+        return
+    try:
+        target = await resolve_target(bot, shared.chat_id, None)
+    except TargetError as exc:
+        await message.reply(str(exc))
+        return
+    if target.chat_type not in ("group", "supergroup") or settings.is_admin_chat(target.chat_id):
+        await message.reply("Это не группа заказчика — выберите другую группу.")
+        return
+    if target.is_forum:
+        topics = await services.chats.topics(target.chat_id)
+        monitored = {
+            c.thread_id
+            for c in await services.chats.list_chats()
+            if c.telegram_chat_id == target.chat_id
+        }
+        await _finish(
+            message,
+            state,
+            bot,
+            menus.add_chat_topics_screen(target.chat_id, target.title, topics, monitored),
+        )
+        return
+    screen, _ = await _connect_chat(bot, services, target, message.from_user, thread_id=None)
     await _finish(message, state, bot, screen)

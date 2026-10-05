@@ -36,13 +36,14 @@ def _thread(message: Message) -> int | None:
     return message.message_thread_id if message.is_topic_message else None
 
 
-async def _is_customer_chat(services: BotServices, chat_id: int) -> bool:
-    return await services.chats.get_details(chat_id) is not None
+async def _is_customer_chat(services: BotServices, message: Message) -> bool:
+    """This group (or this topic of a forum) is a monitored customer chat."""
+    return await services.chats.is_customer_chat(message.chat.id, _thread(message))
 
 
 @router.message(Command("notify_here"), IsGlobalAdmin())
 async def cmd_notify_here(message: Message, services: BotServices) -> None:
-    if await _is_customer_chat(services, message.chat.id):
+    if await _is_customer_chat(services, message):
         return  # never configure from (or expose settings in) a customer chat
     chats = await services.chats.list_chats()
     if not chats:
@@ -83,6 +84,7 @@ async def on_notify_here(
         details.chat.telegram_chat_id,
         MonitoredChatUpdate(notification_chat_id=message.chat.id, notification_thread_id=thread),
         callback.from_user.id,
+        thread_id=details.chat.thread_id,
     )
     await callback.answer("Готово")
     topic = " (в этот топик)" if thread else ""
@@ -96,8 +98,6 @@ async def on_notify_here(
 async def menu_hint(message: Message, services: BotServices, settings: Settings) -> None:
     # Reached only when the menu router declined: not an admin chat. Stay silent in
     # customer chats; elsewhere explain instead of ignoring the admin.
-    if settings.is_admin_chat(message.chat.id) or await _is_customer_chat(
-        services, message.chat.id
-    ):
+    if settings.is_admin_chat(message.chat.id) or await _is_customer_chat(services, message):
         return
     await message.reply(MENU_HINT.format(chat_id=message.chat.id))

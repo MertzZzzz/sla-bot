@@ -195,4 +195,4 @@ async def test_disabling_chat_cancels_open_tickets(
     statuses = [t.status for t in tickets(sync_factory)]
     assert statuses == [PendingReplyStatus.ANSWERED, PendingReplyStatus.CANCELLED]
     assert reply_event_types(sync_factory, tickets(sync_factory)[1].id) == ["created", "cancelled"]
-    assert await services.pending.list_open(CHAT_ID) == []
+    assert await services.pending.list_open(1) == []

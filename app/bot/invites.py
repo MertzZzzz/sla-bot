@@ -110,6 +110,7 @@ async def invite_pilot(
         chat.telegram_chat_id,
         actor_id,
         {status.value: report.count(status) for status in InviteStatus} | {"error": report.error},
+        thread_id=chat.thread_id,
     )
     logger.info(
         "pilot invites processed",

@@ -30,6 +30,8 @@ class ResolvedTarget:
     chat_id: int
     title: str
     is_forum: bool
+    chat_type: str = "supergroup"
+    username: str | None = None
 
 
 def candidates(raw_id: int) -> list[int]:
@@ -55,7 +57,13 @@ async def resolve_target(bot: Bot, raw_id: int, thread_id: int | None) -> Resolv
             msg = "В этом чате нет топиков — уберите ID топика или выберите форум."
             raise TargetError(msg)
         title = chat.title or chat.full_name or str(chat.id)
-        return ResolvedTarget(chat_id=chat.id, title=title, is_forum=bool(chat.is_forum))
+        return ResolvedTarget(
+            chat_id=chat.id,
+            title=title,
+            is_forum=bool(chat.is_forum),
+            chat_type=str(chat.type),
+            username=chat.username,
+        )
     msg = last_problem or (
         f"Бот не видит чат <code>{raw_id}</code>. Проверьте, что бот добавлен в этот чат. "
         "ID групп в Telegram отрицательные: <code>-123…</code> или <code>-100…</code>. "

@@ -9,7 +9,7 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
-from app.db.models import ChatMember, ChatResponder, MonitoredChat, TelegramUser
+from app.db.models import ChatMember, ChatResponder, ForumTopic, MonitoredChat, TelegramUser
 from app.schemas.chats import MonitoredChatCreate
 
 
@@ -18,13 +18,62 @@ class MonitoredChatRepository:
         self._session = session
 
     async def get_by_telegram_id(
-        self, telegram_chat_id: int, *, for_update: bool = False
+        self, telegram_chat_id: int, *, thread_id: int | None = None, for_update: bool = False
     ) -> MonitoredChat | None:
-        stmt = select(MonitoredChat).where(MonitoredChat.telegram_chat_id == telegram_chat_id)
+        """The whole-group chat (``thread_id=None``) or exactly that topic."""
+        thread = (
+            MonitoredChat.thread_id.is_(None)
+            if thread_id is None
+            else MonitoredChat.thread_id == thread_id
+        )
+        stmt = select(MonitoredChat).where(
+            MonitoredChat.telegram_chat_id == telegram_chat_id, thread
+        )
         if for_update:
             stmt = stmt.with_for_update()
         chat: MonitoredChat | None = await self._session.scalar(stmt)
         return chat
+
+    async def get_for_message(
+        self, telegram_chat_id: int, thread_id: int | None
+    ) -> MonitoredChat | None:
+        """Chat a message belongs to: its topic if that topic is monitored, else the group."""
+        if thread_id is not None:
+            topic = await self.get_by_telegram_id(telegram_chat_id, thread_id=thread_id)
+            if topic is not None:
+                return topic
+        return await self.get_by_telegram_id(telegram_chat_id)
+
+    async def list_for_group(self, telegram_chat_id: int) -> list[MonitoredChat]:
+        stmt = select(MonitoredChat).where(MonitoredChat.telegram_chat_id == telegram_chat_id)
+        return list(await self._session.scalars(stmt))
+
+    async def remember_topic(
+        self, telegram_chat_id: int, thread_id: int, name: str, now: datetime
+    ) -> None:
+        stmt = (
+            insert(ForumTopic)
+            .values(
+                telegram_chat_id=telegram_chat_id, thread_id=thread_id, name=name, updated_at=now
+            )
+            .on_conflict_do_update(
+                index_elements=[ForumTopic.telegram_chat_id, ForumTopic.thread_id],
+                set_={"name": name, "updated_at": now},
+            )
+        )
+        await self._session.execute(stmt)
+
+    async def topics(self, telegram_chat_id: int) -> list[ForumTopic]:
+        stmt = (
+            select(ForumTopic)
+            .where(ForumTopic.telegram_chat_id == telegram_chat_id)
+            .order_by(ForumTopic.name)
+        )
+        return list(await self._session.scalars(stmt))
+
+    async def topic_name(self, telegram_chat_id: int, thread_id: int) -> str | None:
+        topic = await self._session.get(ForumTopic, (telegram_chat_id, thread_id))
+        return topic.name if topic else None
 
     async def list_all(self) -> list[MonitoredChat]:
         stmt = select(MonitoredChat).order_by(MonitoredChat.title, MonitoredChat.id)
@@ -38,7 +87,7 @@ class MonitoredChatRepository:
         stmt = (
             insert(MonitoredChat)
             .values(**data.model_dump())
-            .on_conflict_do_nothing(index_elements=[MonitoredChat.telegram_chat_id])
+            .on_conflict_do_nothing()  # same group/topic already monitored
             .returning(MonitoredChat)
         )
         return (await self._session.scalars(stmt)).one_or_none()

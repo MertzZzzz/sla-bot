@@ -7,6 +7,7 @@ from sqlalchemy.exc import IntegrityError
 
 from app.db.uow import UnitOfWork
 from app.schemas.pending_replies import IncomingMessage, MessageProcessingResult
+from app.services.chat_settings import public_link, topic_title
 from app.services.clock import Clock
 from app.services.pending_replies import PendingReplyService
 
@@ -30,17 +31,23 @@ class MessageProcessingService:
         now = self._clock.now()
         try:
             async with self._uow_factory() as uow:
-                chat = await uow.chats.get_by_telegram_id(msg.telegram_chat_id)
+                topic = msg.message_thread_id if msg.is_topic_message else None
+                chat = await uow.chats.get_for_message(msg.telegram_chat_id, topic)
                 if chat is None:
                     return MessageProcessingResult(action="ignored", reason="chat not monitored")
                 if not chat.is_enabled:
                     return MessageProcessingResult(action="ignored", reason="monitoring disabled")
-                if chat.title != msg.chat_title:
-                    chat.title = msg.chat_title
+                title = (
+                    topic_title(msg.chat_title, chat.thread_id, chat.topic_name)
+                    if chat.thread_id
+                    else msg.chat_title
+                )
+                if chat.title != title:
+                    chat.title = title[:256]
                 if msg.chat_username and chat.chat_username != msg.chat_username:
                     # Became public (or renamed): the public link is the best one.
                     chat.chat_username = msg.chat_username
-                    chat.chat_link = f"https://t.me/{msg.chat_username}"
+                    chat.chat_link = public_link(msg.chat_username, chat.thread_id)
                 user = await uow.users.upsert(msg.author, now)
                 await uow.members.touch(chat.id, user.id, now)
                 if await uow.responders.is_responder(chat.id, user.id):

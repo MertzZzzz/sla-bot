@@ -223,10 +223,8 @@ class PendingReplyService:
         responsible = await uow.users.get(chat.responsible_user_id)
         return responsible is not None and responsible.telegram_user_id == actor_id
 
-    async def list_open(self, telegram_chat_id: int, limit: int = 50) -> list[PendingReplyRead]:
+    async def list_open(self, chat_id: int, limit: int = 50) -> list[PendingReplyRead]:
+        """Open tickets of a monitored chat (internal ID)."""
         async with self._uow_factory() as uow:
-            chat = await uow.chats.get_by_telegram_id(telegram_chat_id)
-            if chat is None:
-                return []
-            rows = await uow.pending.list_open(chat.id, limit)
+            rows = await uow.pending.list_open(chat_id, limit)
             return [PendingReplyRead.model_validate(r) for r in rows]

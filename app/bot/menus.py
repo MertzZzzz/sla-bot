@@ -210,12 +210,18 @@ def admin_delete_confirm(admin: AdminView) -> Screen:
 # --- chats --------------------------------------------------------------------------
 
 
-def chats_screen(chats: list[MonitoredChatRead], page: int) -> Screen:
+ADD_CHAT_HINT = (
+    "Подключить чат: «➕ Подключить чат» (в личке с ботом) или /chat_add в самой группе. "
+    "Чтобы отслеживать одну тему форума — /chat_add внутри этой темы."
+)
+
+
+def chats_screen(chats: list[MonitoredChatRead], page: int, *, private: bool = False) -> Screen:
+    add_row = [button("➕ Подключить чат", A.CHAT_ADD_PICK)] if private else []
     if not chats:
         return Screen(
-            "💬 <b>Чаты</b>\n\nЧатов пока нет. Добавьте бота в группу заказчика и выполните "
-            "в ней команду /chat_add — настройки чата появятся здесь.",
-            keyboard([button("« Меню", A.HOME)]),
+            f"💬 <b>Чаты</b>\n\nЧатов пока нет. Добавьте бота в группу заказчика.\n{ADD_CHAT_HINT}",
+            keyboard(add_row, [button("« Меню", A.HOME)]),
         )
     visible, page = _page(chats, page, CHATS_PAGE_SIZE)
     rows = [
@@ -225,11 +231,46 @@ def chats_screen(chats: list[MonitoredChatRead], page: int) -> Screen:
     text = f"💬 <b>Чаты</b> ({len(chats)})\n\nВыберите чат, чтобы открыть его настройки."
     if any(not c.is_enabled for c in chats):
         text += "\n⏸ — мониторинг выключен."
+    text += f"\n\n{ADD_CHAT_HINT}"
     return Screen(
         text,
         keyboard(
-            *rows, _pager(A.CHATS, 0, page, len(chats), CHATS_PAGE_SIZE), [button("« Меню", A.HOME)]
+            *rows,
+            _pager(A.CHATS, 0, page, len(chats), CHATS_PAGE_SIZE),
+            add_row,
+            [button("« Меню", A.HOME)],
         ),
+    )
+
+
+def add_chat_topics_screen(
+    chat_id: int, title: str, topics: list[tuple[int, str]], monitored: set[int | None]
+) -> Screen:
+    """Forum picked: monitor the whole group or one of the topics the bot has seen."""
+
+    def mark(thread: int | None, label: str) -> str:
+        return f"✓ {label}" if thread in monitored else label
+
+    rows = [[button(mark(None, "Весь чат (все темы)"), A.CHAT_ADD_CONFIRM, v=str(chat_id))]]
+    rows += [
+        [
+            button(
+                mark(thread, f"# {truncate(name, 45)}"),
+                A.CHAT_ADD_CONFIRM,
+                v=str(chat_id),
+                p=thread,
+            )
+        ]
+        for thread, name in topics
+    ]
+    hint = (
+        "Темы появляются здесь, когда в них кто-то пишет (Telegram не даёт боту список тем). "
+        "Нет нужной темы — напишите в неё что-нибудь или выполните /chat_add внутри неё."
+    )
+    return Screen(
+        f"💬 <b>{escape(title)}</b> — форум\n\nЧто отслеживать как чат заказчика? "
+        f"Каждая тема — отдельный чат со своими настройками. ✓ — уже подключено.\n\n{hint}",
+        keyboard(*rows, [button("« Чаты", A.CHATS)]),
     )
 
 
@@ -267,7 +308,12 @@ def chat_text(details: MonitoredChatDetails) -> str:
         [
             f"💬 <b>{escape(chat.title)}</b>",
             "",
-            f"ID чата: <code>{chat.telegram_chat_id}</code> ({CHAT_TYPE_TITLES[chat.chat_type]})",
+            f"ID чата: <code>{chat.telegram_chat_id}</code> ({CHAT_TYPE_TITLES[chat.chat_type]})"
+            + (
+                f"\nТема форума: {escape(chat.topic_name or '—')} (<code>{chat.thread_id}</code>)"
+                if chat.thread_id
+                else ""
+            ),
             "Мониторинг: " + ("✅ включён" if chat.is_enabled else "⏸ выключен"),
             f"Приоритет: {chat.priority.label}",
             f"SLA: {format_duration(chat.sla_seconds)}",

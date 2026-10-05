@@ -3,7 +3,7 @@ from __future__ import annotations
 from aiogram import F, Router
 from aiogram.types import Message, Update
 
-from app.bot.extractors import extract_incoming
+from app.bot.extractors import extract_incoming, topic_of
 from app.bot.services import BotServices
 
 router = Router(name="messages")
@@ -17,6 +17,10 @@ async def on_group_migrated(message: Message, services: BotServices) -> None:
 
 @router.message()
 async def on_group_message(message: Message, services: BotServices, event_update: Update) -> None:
+    topic = topic_of(message)
+    if topic is not None and topic[1]:
+        # Learn topic names: the Bot API cannot list forum topics.
+        await services.chats.remember_topic(message.chat.id, topic[0], topic[1])
     incoming = extract_incoming(message, update_id=event_update.update_id)
     if incoming is None:
         return
