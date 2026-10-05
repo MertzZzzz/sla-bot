@@ -1,8 +1,18 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 
-from sqlalchemy import BigInteger, CheckConstraint, ForeignKey, Index, Integer, String, func, text
+from sqlalchemy import (
+    BigInteger,
+    CheckConstraint,
+    Date,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    func,
+    text,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.enums import ChatType, Priority, ReplyMatchMode
@@ -46,6 +56,9 @@ class MonitoredChat(TimestampMixin, Base):
     )
     notification_chat_id: Mapped[int | None] = mapped_column(BigInteger)
     notification_thread_id: Mapped[int | None] = mapped_column(BigInteger)
+    # Reference dates of the pilot (informational only, shown in the menu).
+    pilot_start: Mapped[date | None] = mapped_column(Date)
+    pilot_end: Mapped[date | None] = mapped_column(Date)
     timezone: Mapped[str] = mapped_column(
         String(64), default="Europe/Moscow", server_default="Europe/Moscow", nullable=False
     )

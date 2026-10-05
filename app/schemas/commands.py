@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from datetime import date, datetime, timedelta
 
 from pydantic import Field, ValidationError
 
@@ -111,3 +112,30 @@ class StatsCommand(Schema):
             raise CommandArgumentError(
                 "Использование: /stats [days], days от 1 до 365 (по умолчанию 30)"
             ) from exc
+
+
+_DATE_FORMATS = ("%d.%m.%Y", "%d.%m.%y", "%Y-%m-%d", "%d/%m/%Y")
+CLEAR_WORDS = frozenset({"-", "—", "нет", "очистить", "удалить"})
+
+
+class DateInput(Schema):
+    """``01.11.2026``, ``1.11.26``, ``2026-11-01``, ``сегодня``/``завтра``; ``-`` clears."""
+
+    value: date | None
+
+    @classmethod
+    def parse(cls, text: str | None, today: date) -> DateInput:
+        raw = (text or "").strip().lower()
+        if raw in CLEAR_WORDS:
+            return cls(value=None)
+        if raw == "сегодня":
+            return cls(value=today)
+        if raw == "завтра":
+            return cls(value=today + timedelta(days=1))
+        for fmt in _DATE_FORMATS:
+            try:
+                return cls(value=datetime.strptime(raw, fmt).date())
+            except ValueError:
+                continue
+        msg = "Введите дату: 01.11.2026, 1.11.26 или 2026-11-01 («-» — очистить)."
+        raise CommandArgumentError(msg)

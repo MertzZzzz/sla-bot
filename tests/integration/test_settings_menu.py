@@ -176,6 +176,8 @@ async def test_chat_card_shows_every_setting_including_empty(nav: Nav, chat_id: 
         "Чат уведомлений: <i>не задано</i>",
         "Топик уведомлений: <i>не задано</i>",
         "Открытых ожиданий: 0",
+        "Начало пилота: <i>не задано</i>",
+        "Окончание пилота: <i>не задано</i>",
         "Подключён:",
     ):
         assert label in text, label
@@ -190,6 +192,8 @@ async def test_chat_card_shows_every_setting_including_empty(nav: Nav, chat_id: 
         "🔔 Уведомления",
         "🕒 Открытые ожидания (0)",
         "📨 Пригласить участников пилота",
+        "📅 Сроки пилота",
+        "🗑 Удалить чат",
         "« Чаты",
     } == set(nav.buttons())
 

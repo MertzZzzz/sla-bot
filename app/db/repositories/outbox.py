@@ -4,7 +4,7 @@ from collections.abc import Sequence
 from datetime import datetime, timedelta
 from typing import Any
 
-from sqlalchemy import Select, or_, select, update
+from sqlalchemy import Select, delete, or_, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
@@ -115,3 +115,16 @@ class AsyncOutboxRepository:
         stmt = self._chat_events(chat_id).order_by(OutboxEvent.updated_at.desc()).limit(1)
         event: OutboxEvent | None = await self._session.scalar(stmt)
         return event
+
+    async def delete_for_chat(self, chat_id: int) -> int:
+        """Outbox rows have no FK to tickets: remove them before deleting a chat."""
+        tickets = select(PendingReply.id).where(PendingReply.chat_id == chat_id)
+        stmt = (
+            delete(OutboxEvent)
+            .where(
+                OutboxEvent.aggregate_type == AggregateType.PENDING_REPLY,
+                OutboxEvent.aggregate_id.in_(tickets),
+            )
+            .returning(OutboxEvent.id)
+        )
+        return len((await self._session.scalars(stmt)).all())

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import date, datetime
+from zoneinfo import ZoneInfo
 
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
@@ -332,6 +334,7 @@ def chat_text(details: MonitoredChatDetails) -> str:
             *_notification_lines(chat),
             *_delivery_error_lines(details),
             f"Открытых ожиданий: {details.open_tickets}",
+            *pilot_dates_lines(chat, today_in(chat.timezone)),
             f"Подключён: {format_datetime(chat.created_at, chat.timezone)}",
         ]
     )
@@ -361,6 +364,7 @@ def chat_screen(details: MonitoredChatDetails, notice: str | None = None) -> Scr
             [button("🔔 Уведомления", A.NOTIFICATIONS, i)],
             [button(f"🕒 Открытые ожидания ({details.open_tickets})", A.OPEN_TICKETS, i)],
             [button("📨 Пригласить участников пилота", A.INVITE, i)],
+            [button("📅 Сроки пилота", A.DATES, i), button("🗑 Удалить чат", A.CHAT_DELETE, i)],
             [button("« Чаты", A.CHATS)],
         ),
     )
@@ -656,3 +660,80 @@ def invite_confirm_screen(details: MonitoredChatDetails, people: list[PilotView]
 
 def invite_result_screen(chat_id: int, text: str) -> Screen:
     return Screen(text, keyboard(back_to_chat(chat_id)))
+
+
+# --- pilot dates & deletion -------------------------------------------------------------
+
+
+def today_in(timezone: str) -> date:
+    return datetime.now(ZoneInfo(timezone)).date()
+
+
+def _date(value: date | None) -> str:
+    return value.strftime("%d.%m.%Y") if value else NOT_SET
+
+
+def pilot_dates_lines(chat: MonitoredChatRead, today: date) -> list[str]:
+    """Reference dates only: they do not change how the bot works."""
+    status = ""
+    if chat.pilot_start and today < chat.pilot_start:
+        status = f" (начнётся через {(chat.pilot_start - today).days} дн.)"
+    elif chat.pilot_end and today > chat.pilot_end:
+        status = " (завершён)"
+    elif chat.pilot_end:
+        status = f" (осталось {(chat.pilot_end - today).days} дн.)"
+    return [
+        f"Начало пилота: {_date(chat.pilot_start)}",
+        f"Окончание пилота: {_date(chat.pilot_end)}{status}",
+    ]
+
+
+def dates_screen(chat: MonitoredChatRead, today: date) -> Screen:
+    rows = [
+        [
+            button("✏️ Начало", A.DATES_INPUT, chat.id, "start"),
+            button("✏️ Окончание", A.DATES_INPUT, chat.id, "end"),
+        ]
+    ]
+    clear = []
+    if chat.pilot_start:
+        clear.append(button("✖ Очистить начало", A.DATES_CLEAR, chat.id, "start"))
+    if chat.pilot_end:
+        clear.append(button("✖ Очистить окончание", A.DATES_CLEAR, chat.id, "end"))
+    return Screen(
+        "\n".join(
+            [
+                f"📅 <b>Сроки пилота</b> · {escape(chat.title)}",
+                "",
+                *pilot_dates_lines(chat, today),
+                "",
+                "Даты справочные: показываются в карточке чата и не влияют на работу бота.",
+            ]
+        ),
+        keyboard(*rows, clear, back_to_chat(chat.id)),
+    )
+
+
+def chat_delete_confirm(details: MonitoredChatDetails) -> Screen:
+    chat = details.chat
+    return Screen(
+        "\n".join(
+            [
+                f"🗑 <b>Удалить чат «{escape(chat.title)}»?</b>",
+                "",
+                "Будут безвозвратно удалены настройки чата, ожидания ответа "
+                f"(открытых сейчас: {details.open_tickets}), их история и статистика.",
+                "Бот перестанет отслеживать чат; подключить снова можно через /chat_add или "
+                "«➕ Подключить чат».",
+                "",
+                "Чтобы сохранить историю, лучше выключить мониторинг.",
+            ]
+        ),
+        keyboard(
+            [button("🗑 Да, удалить", A.CHAT_DELETE_CONFIRM, chat.id)],
+            [button("⏸ Лучше выключить мониторинг", A.ENABLE, chat.id, "0")]
+            if chat.is_enabled
+            else [],
+            back_to_chat(chat.id),
+        ),
+    )

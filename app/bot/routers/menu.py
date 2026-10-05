@@ -51,6 +51,7 @@ from app.schemas.chats import MonitoredChatDetails, MonitoredChatUpdate
 from app.schemas.commands import (
     ChangeTimezoneCommand,
     CommandArgumentError,
+    DateInput,
     SetNotificationCommand,
     SlaInput,
 )
@@ -65,6 +66,7 @@ router.message.filter(IsSettingsChat())
 
 class MenuInput(StatesGroup):
     add_chat = State()
+    pilot_date = State()
     pilot = State()
     sla = State()
     timezone = State()
@@ -145,6 +147,7 @@ class Ctx:
 Handler = Callable[[Ctx], Awaitable[Screen | None]]
 HANDLERS: dict[A, Handler] = {}
 INPUT_ACTIONS = {
+    A.DATES_INPUT,
     A.ADMIN_ADD,
     A.PILOT_ADD,
     A.SLA_INPUT,
@@ -526,6 +529,50 @@ async def notifications_here(ctx: Ctx) -> Screen:
 async def notifications_clear(ctx: Ctx) -> Screen:
     changes = MonitoredChatUpdate(notification_chat_id=None, notification_thread_id=None)
     return await _update(ctx, changes, "Уведомления отключены")
+
+
+@on(A.DATES)
+async def dates(ctx: Ctx) -> Screen:
+    details = await _card(ctx)
+    if details is None:
+        return await chats_list(ctx)
+    return menus.dates_screen(details.chat, menus.today_in(details.chat.timezone))
+
+
+@on(A.DATES_INPUT)
+async def dates_input(ctx: Ctx) -> Screen:
+    which = "начала" if ctx.data.v == "start" else "окончания"
+    screen = await _prompt(
+        ctx,
+        MenuInput.pilot_date,
+        f"📅 <b>Дата {which} пилота</b>\n\nВведите дату: <code>01.11.2026</code>, "
+        "<code>1.11.26</code>, <code>2026-11-01</code>, «сегодня» или «завтра». «-» — очистить.",
+        cancel_to=A.DATES,
+    )
+    await ctx.state.update_data(which=ctx.data.v)
+    return screen
+
+
+@on(A.DATES_CLEAR)
+async def dates_clear(ctx: Ctx) -> Screen:
+    field = "pilot_start" if ctx.data.v == "start" else "pilot_end"
+    await _update(ctx, MonitoredChatUpdate.model_validate({field: None}), "Дата очищена")
+    return await dates(ctx)
+
+
+@on(A.CHAT_DELETE)
+async def chat_delete(ctx: Ctx) -> Screen:
+    details = await _card(ctx)
+    if details is None:
+        return await chats_list(ctx)
+    return menus.chat_delete_confirm(details)
+
+
+@on(A.CHAT_DELETE_CONFIRM)
+async def chat_delete_confirm(ctx: Ctx) -> Screen:
+    title = await ctx.services.chats.delete_chat(ctx.data.i, ctx.actor_id)
+    ctx.toast = f"Чат «{title}» удалён" if title else "Чат не найден."
+    return await chats_list(ctx)
 
 
 @on(A.OPEN_TICKETS)
@@ -937,3 +984,38 @@ async def input_add_chat(
         return
     screen, _ = await _connect_chat(bot, services, target, message.from_user, thread_id=None)
     await _finish(message, state, bot, screen)
+
+
+@router.message(StateFilter(MenuInput.pilot_date), IsGlobalAdmin(), NOT_COMMAND)
+async def input_pilot_date(
+    message: Message, state: FSMContext, services: BotServices, bot: Bot
+) -> None:
+    details = await _input_chat(message, state, services)
+    if details is None or message.from_user is None:
+        return
+    chat = details.chat
+    field = "pilot_start" if (await state.get_data()).get("which") == "start" else "pilot_end"
+    try:
+        value = DateInput.parse(message.text, menus.today_in(chat.timezone)).value
+    except CommandArgumentError as exc:
+        await message.reply(str(exc))
+        return
+    start = value if field == "pilot_start" else chat.pilot_start
+    end = value if field == "pilot_end" else chat.pilot_end
+    if start and end and end < start:
+        await message.reply("Окончание пилота не может быть раньше начала — введите другую дату.")
+        return
+    await services.chats.update(
+        chat.telegram_chat_id,
+        MonitoredChatUpdate.model_validate({field: value}),
+        message.from_user.id,
+        thread_id=chat.thread_id,
+    )
+    fresh = await services.chats.get_card(chat.id)
+    assert fresh is not None
+    label = "Начало" if field == "pilot_start" else "Окончание"
+    shown = value.strftime("%d.%m.%Y") if value else "очищено"
+    screen = menus.dates_screen(fresh.chat, menus.today_in(chat.timezone))
+    await _finish(
+        message, state, bot, Screen(f"✅ {label} пилота: {shown}\n\n{screen.text}", screen.markup)
+    )

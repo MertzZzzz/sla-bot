@@ -80,6 +80,11 @@ class MenuAction(StrEnum):
     NOTIFICATIONS_INPUT = "ni"
     NOTIFICATIONS_CLEAR = "nx"
     OPEN_TICKETS = "op"
+    DATES = "ds"
+    DATES_INPUT = "de"  # v=start|end
+    DATES_CLEAR = "dc"  # v=start|end
+    CHAT_DELETE = "cd"
+    CHAT_DELETE_CONFIRM = "cy"
 
 
 class MenuCallbackData(CallbackData, prefix="m"):

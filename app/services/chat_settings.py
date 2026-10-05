@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
@@ -24,6 +25,8 @@ from app.schemas.users import TelegramUserData, TelegramUserRead
 from app.services.audit import AuditService
 from app.services.clock import Clock
 
+logger = logging.getLogger(__name__)
+
 
 class ChatNotMonitoredError(Exception):
     pass
@@ -43,6 +46,8 @@ UPDATE_ACTIONS: dict[str, ChatConfigAction] = {
     "timezone": ChatConfigAction.TIMEZONE_CHANGED,
     "notification_chat_id": ChatConfigAction.NOTIFICATION_CHANGED,
     "notification_thread_id": ChatConfigAction.NOTIFICATION_CHANGED,
+    "pilot_start": ChatConfigAction.PILOT_DATES_CHANGED,
+    "pilot_end": ChatConfigAction.PILOT_DATES_CHANGED,
 }
 
 
@@ -145,6 +150,31 @@ class ChatSettingsService:
                 action=ChatConfigAction.RESPONDER_ADDED,
                 new_value={"telegram_user_ids": added, "source": "admins_by_default"},
             )
+
+    async def delete_chat(self, chat_id: int, actor_id: int) -> str | None:
+        """Stop monitoring and delete the chat with its tickets, history and settings.
+
+        Returns the deleted chat's title (``None`` if it did not exist). Escalations of
+        its tickets still in the outbox are dropped; buttons on notifications already
+        sent simply report that the ticket no longer exists.
+        """
+        async with self._uow_factory() as uow:
+            chat = await uow.chats.get(chat_id, for_update=True)
+            if chat is None:
+                return None
+            title = chat.title
+            await uow.outbox.delete_for_chat(chat.id)
+            await uow.session.delete(chat)  # FK cascades: tickets, events, responders, audit
+            await uow.commit()
+        logger.warning(
+            "monitored chat deleted",
+            extra={
+                "event": "chat_deleted",
+                "telegram_chat_id": chat.telegram_chat_id,
+                "telegram_user_id": actor_id,
+            },
+        )
+        return title
 
     async def set_chat_link(self, chat_id: int, link: str) -> None:
         async with self._uow_factory() as uow:

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 
 from pydantic import Field
 
@@ -41,6 +41,8 @@ class MonitoredChatUpdate(Schema):
     timezone: TimezoneName | None = None
     notification_chat_id: TelegramChatId | None = None
     notification_thread_id: ThreadId = None
+    pilot_start: date | None = None
+    pilot_end: date | None = None
 
 
 class MonitoredChatRead(Schema):
@@ -60,6 +62,8 @@ class MonitoredChatRead(Schema):
     notification_chat_id: int | None
     notification_thread_id: int | None
     timezone: str
+    pilot_start: date | None = None
+    pilot_end: date | None = None
     created_at: datetime
     updated_at: datetime
 

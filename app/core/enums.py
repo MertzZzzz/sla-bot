@@ -98,3 +98,5 @@ class ChatConfigAction(StrEnum):
     RESPONDER_REMOVED = "responder_removed"
     NOTIFICATION_CHANGED = "notification_changed"
     PILOT_INVITED = "pilot_invited"
+    PILOT_DATES_CHANGED = "pilot_dates_changed"
+    CHAT_DELETED = "chat_deleted"
