@@ -9,6 +9,7 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     Integer,
+    SmallInteger,
     String,
     Text,
     UniqueConstraint,
@@ -95,6 +96,10 @@ class PendingReply(TimestampMixin, Base):
         nullable=False,
     )
     overdue_at: Mapped[datetime | None] = mapped_column()
+    # Highest "SLA is running out" warning already escalated (percent of SLA elapsed).
+    warning_level: Mapped[int] = mapped_column(
+        SmallInteger, default=0, server_default="0", nullable=False
+    )
     responded_at: Mapped[datetime | None] = mapped_column()
     responded_by_user_id: Mapped[int | None] = mapped_column(
         ForeignKey("telegram_users.id", ondelete="SET NULL")

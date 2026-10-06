@@ -48,7 +48,7 @@ def get_worker_context() -> WorkerContext:
         ]
 
     return WorkerContext(
-        sla=SlaService(uow_factory, clock, settings.celery),
+        sla=SlaService(uow_factory, clock, settings.celery, settings.app.sla_warning_percents),
         notifications=NotificationService(
             uow_factory,
             AiogramNotificationSender(settings.telegram),

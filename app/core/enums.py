@@ -61,6 +61,7 @@ class OutboxStatus(StrEnum):
 
 class OutboxEventType(StrEnum):
     SLA_OVERDUE_NOTIFICATION = "sla_overdue_notification"
+    SLA_WARNING = "sla_warning"  # dedup_key = percent of the SLA elapsed, e.g. "50"
 
 
 class AggregateType(StrEnum):

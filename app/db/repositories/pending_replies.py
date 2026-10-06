@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from datetime import datetime
 
-from sqlalchemy import Select, func, select, text
+from sqlalchemy import DateTime, Select, and_, func, literal, or_, select, text
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
@@ -192,6 +192,29 @@ class PendingReplySyncRepository:
                 PendingReply.status == PendingReplyStatus.WAITING, PendingReply.deadline_at <= now
             )
             .order_by(PendingReply.deadline_at)
+            .limit(limit)
+            .with_for_update(skip_locked=True)
+        )
+        return self._session.scalars(stmt).all()
+
+    def claim_warnings(
+        self, now: datetime, percents: Sequence[int], limit: int
+    ) -> Sequence[PendingReply]:
+        """Lock ``waiting`` tickets that crossed a warning threshold not yet escalated.
+
+        Threshold ``p`` is reached when ``p%`` of the ticket's own SLA window
+        (``created_at`` → ``deadline_at``) has elapsed.
+        """
+        if not percents:
+            return []
+        pr = PendingReply
+        window = func.extract("epoch", pr.deadline_at - pr.created_at)
+        elapsed = func.extract("epoch", literal(now, DateTime(timezone=True)) - pr.created_at)
+        reached = [and_(pr.warning_level < p, elapsed >= window * (p / 100)) for p in percents]
+        stmt = (
+            select(pr)
+            .where(pr.status == PendingReplyStatus.WAITING, pr.deadline_at > now, or_(*reached))
+            .order_by(pr.deadline_at)
             .limit(limit)
             .with_for_update(skip_locked=True)
         )

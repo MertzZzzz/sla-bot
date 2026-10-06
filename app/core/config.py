@@ -35,10 +35,27 @@ class AppSettings(BaseModel):
     # Consecutive messages of one author (while their ticket is open, in the same topic)
     # join that ticket instead of opening new ones: one answer closes them all.
     merge_consecutive_messages: bool = True
+    # "SLA is running out" warnings when this share of the SLA has elapsed (percent),
+    # e.g. 50 and 75; empty disables warnings. The breach notification comes at 100%.
+    sla_warning_percents: Annotated[tuple[int, ...], NoDecode] = (50, 75)
     # A newly added chat gets all global admins as responders (removable in the menu).
     admins_as_default_responders: bool = True
     # Assigning a responsible also adds them to the chat responders.
     auto_add_responsible_as_responder: bool = True
+
+    @field_validator("sla_warning_percents", mode="before")
+    @classmethod
+    def parse_warning_percents(cls, value: object) -> object:
+        return parse_int_list(value)
+
+    @field_validator("sla_warning_percents")
+    @classmethod
+    def check_warning_percents(cls, value: tuple[int, ...]) -> tuple[int, ...]:
+        if any(not 0 < p < 100 for p in value):
+            msg = "SLA warning percents must be between 1 and 99"
+            raise ValueError(msg)
+        return tuple(sorted(set(value)))
+
     # One HTTP server serves /health/* and, in webhook mode, the Telegram webhook.
     http_host: str = "0.0.0.0"  # noqa: S104 - container listens on all interfaces
     http_port: int = Field(default=8080, gt=0, lt=65536)
@@ -74,6 +91,19 @@ def normalize_proxy_url(raw: str) -> str:
         msg = "Proxy URL must not contain a path or query"
         raise ValueError(msg)
     return parts._replace(scheme=scheme, path="").geturl()
+
+
+def parse_int_list(value: object) -> object:
+    """``"50,75"`` / ``"50 75"`` / ``"[50, 75]"`` from the environment."""
+    if value is None:
+        return ()
+    if isinstance(value, int):
+        return (value,)
+    if isinstance(value, str):
+        raw = value.strip().strip("[]")
+        parts = [p.strip() for p in raw.replace(";", ",").replace(" ", ",").split(",")]
+        return tuple(int(p) for p in parts if p)
+    return value
 
 
 class TelegramSettings(BaseModel):

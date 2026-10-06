@@ -168,3 +168,14 @@ def test_admin_chats(monkeypatch: pytest.MonkeyPatch) -> None:
     assert not settings.is_settings_chat(-1009999, "supergroup")
     with pytest.raises(ValidationError):
         make_settings(admin_chat_ids="0")
+
+
+def test_sla_warning_percents(monkeypatch: pytest.MonkeyPatch) -> None:
+    assert AppSettings().sla_warning_percents == (50, 75)
+    monkeypatch.setenv("APP_TELEGRAM__BOT_TOKEN", "1:secret")
+    monkeypatch.setenv("APP_APP__SLA_WARNING_PERCENTS", "75, 50, 90")
+    assert Settings(_env_file=None).app.sla_warning_percents == (50, 75, 90)
+    monkeypatch.setenv("APP_APP__SLA_WARNING_PERCENTS", "")
+    assert Settings(_env_file=None).app.sla_warning_percents == ()
+    with pytest.raises(ValidationError):
+        AppSettings(sla_warning_percents=(0, 100))

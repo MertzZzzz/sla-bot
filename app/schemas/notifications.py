@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Literal
 
 from app.core.enums import Priority
 from app.core.types import TelegramChatId, ThreadId
@@ -31,6 +32,9 @@ class NotificationPayload(Schema):
     message_link: str | None
     timezone: str
     chat_link: str | None = None
+    # "overdue" — SLA breached; "warning" — warning_percent of the SLA has elapsed.
+    kind: Literal["overdue", "warning"] = "overdue"
+    warning_percent: int | None = None
     # Follow-up messages merged into the ticket (defaults keep old payloads valid).
     message_count: int = 1
     last_message_text: str | None = None

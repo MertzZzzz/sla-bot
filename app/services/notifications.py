@@ -7,8 +7,8 @@ from datetime import datetime, timedelta
 from enum import StrEnum
 
 from app.core.config import CelerySettings
-from app.core.enums import OutboxStatus, PendingReplyStatus
-from app.db.models import OutboxEvent
+from app.core.enums import OutboxEventType, OutboxStatus, PendingReplyStatus
+from app.db.models import OutboxEvent, PendingReply
 from app.db.uow import SyncUnitOfWork
 from app.schemas.notifications import NotificationPayload, RenderedNotification
 from app.services.clock import Clock
@@ -71,9 +71,10 @@ def render_notification(payload: NotificationPayload, now: datetime) -> Rendered
             f"Сообщений: {payload.message_count} (последнее "
             f"{format_datetime(last, payload.timezone)})"
         ]
+    title, timing = _headline(payload, now)
     head = "\n".join(
         [
-            "🔴 <b>SLA нарушен</b>",
+            title,
             "",
             f"Чат: {_chat_title_html(payload)}",
             f"Приоритет: {payload.priority.label}",
@@ -84,7 +85,7 @@ def render_notification(payload: NotificationPayload, now: datetime) -> Rendered
             f"Получено: {format_datetime(payload.source_message_date, payload.timezone)}"
             f" ({escape(payload.timezone)})",
             *count_line,
-            f"Просрочка: {format_duration((now - payload.deadline_at).total_seconds())}",
+            timing,
         ]
     )
     tail = (
@@ -106,6 +107,23 @@ def render_notification(payload: NotificationPayload, now: datetime) -> Rendered
     return RenderedNotification(
         text=text, target_chat_id=payload.target_chat_id, target_thread_id=payload.target_thread_id
     )
+
+
+def _headline(payload: NotificationPayload, now: datetime) -> tuple[str, str]:
+    """Title and the timing line: overdue duration, or time left for a warning."""
+    if payload.kind == "warning":
+        percent = payload.warning_percent or 0
+        left = format_duration(max(0.0, (payload.deadline_at - now).total_seconds()))
+        deadline = format_datetime(payload.deadline_at, payload.timezone)
+        if percent >= 75:
+            title = f"🟠 <b>SLA скоро истечёт</b> — прошло {percent}% времени"
+        elif percent == 50:
+            title = "🟡 <b>SLA: прошла половина времени</b>"
+        else:
+            title = f"🟡 <b>SLA: прошло {percent}% времени</b>"
+        return title, f"Осталось: {left} (до {deadline})"
+    overdue = format_duration((now - payload.deadline_at).total_seconds())
+    return "🔴 <b>SLA нарушен</b>", f"Просрочка: {overdue}"
 
 
 def _chat_title_html(payload: NotificationPayload) -> str:
@@ -153,6 +171,14 @@ def backoff_seconds(
     if retry_after is not None:
         delay = max(delay, retry_after)
     return delay
+
+
+def _still_relevant(event: OutboxEvent, ticket: PendingReply | None, now: datetime) -> bool:
+    if ticket is None:
+        return False
+    if event.event_type is OutboxEventType.SLA_WARNING:
+        return ticket.status is PendingReplyStatus.WAITING and ticket.deadline_at > now
+    return ticket.status is PendingReplyStatus.OVERDUE
 
 
 @dataclass(frozen=True, slots=True)
@@ -204,7 +230,8 @@ class NotificationService:
         except (PermanentDeliveryError, NotificationConfigError) as exc:
             error_type = exc.error_type if isinstance(exc, PermanentDeliveryError) else "config"
             outcome = self._record_failure(event_id, f"{error_type}: {exc}", log_ctx)
-            self._alert_admins(payload, str(exc))
+            if payload.kind == "overdue":  # a lost breach notification needs a human
+                self._alert_admins(payload, str(exc))
             return outcome
         self._record_sent(event_id, payload, rendered, message_id)
         logger.info(
@@ -224,13 +251,15 @@ class NotificationService:
             if event.available_at > now + timedelta(seconds=1):
                 return _Claim(DeliveryOutcome(DeliveryStatus.SKIPPED, reason="not yet available"))
             ticket = uow.pending.get(event.aggregate_id)
-            if ticket is None or ticket.status is not PendingReplyStatus.OVERDUE:
-                # Answered or closed between escalation and delivery: nothing to notify.
+            if not _still_relevant(event, ticket, now):
+                # Answered/closed (or, for a warning, already breached) since it was
+                # queued: nothing to notify.
                 event.status = OutboxStatus.CANCELLED
                 event.locked_at = None
                 event.last_error = f"ticket status: {ticket.status.value if ticket else 'missing'}"
                 uow.commit()
                 return _Claim(DeliveryOutcome(DeliveryStatus.CANCELLED, reason=event.last_error))
+            assert ticket is not None
             if event.attempts >= self._settings.max_delivery_attempts:
                 self._fail(event, "max delivery attempts exceeded")
                 uow.commit()
@@ -275,7 +304,7 @@ class NotificationService:
                     "notification_message_id": message_id,
                 }
             ticket = uow.pending.get_for_update(payload.pending_reply_id)
-            if ticket is not None:
+            if ticket is not None and payload.kind == "overdue":
                 ticket.notification_chat_id = rendered.target_chat_id
                 ticket.notification_message_id = message_id
                 ticket.notification_sent_at = now

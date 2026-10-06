@@ -24,12 +24,15 @@ class OutboxRepository:
         event_type: OutboxEventType,
         aggregate_type: AggregateType,
         aggregate_id: int,
+        *,
         payload: dict[str, Any],
         available_at: datetime,
+        dedup_key: str = "",
     ) -> int | None:
         stmt = (
             insert(OutboxEvent)
             .values(
+                dedup_key=dedup_key,
                 event_type=event_type,
                 aggregate_type=aggregate_type,
                 aggregate_id=aggregate_id,

@@ -124,3 +124,25 @@ def test_chat_title_links_to_chat() -> None:
     assert "Чат: <b>Поддержка VIP</b>" in plain
     escaped = render_notification(payload(chat_link='https://t.me/x"><script>'), T0).text
     assert "<script>" not in escaped
+
+
+@pytest.mark.parametrize(
+    ("percent", "title"),
+    [
+        (50, "🟡 <b>SLA: прошла половина времени</b>"),
+        (60, "🟡 <b>SLA: прошло 60% времени</b>"),
+        (75, "🟠 <b>SLA скоро истечёт</b> — прошло 75% времени"),
+    ],
+)
+def test_render_warning(percent: int, title: str) -> None:
+    now = T0 + timedelta(minutes=15 * percent / 100)
+    text = render_notification(payload(kind="warning", warning_percent=percent), now).text
+    assert text.startswith(title)
+    assert "Осталось:" in text
+    assert "Просрочка" not in text
+
+
+def test_old_payload_without_kind_is_a_breach() -> None:
+    assert render_notification(payload(), T0 + timedelta(minutes=20)).text.startswith(
+        "🔴 <b>SLA нарушен</b>"
+    )

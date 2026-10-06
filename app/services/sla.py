@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable
-from datetime import timedelta
+from collections.abc import Callable, Sequence
+from datetime import datetime, timedelta
 
 from app.core.config import CelerySettings
 from app.core.enums import (
@@ -28,10 +28,12 @@ class SlaService:
         uow_factory: Callable[[], SyncUnitOfWork],
         clock: Clock,
         settings: CelerySettings,
+        warning_percents: Sequence[int] = (50, 75),
     ) -> None:
         self._uow_factory = uow_factory
         self._clock = clock
         self._settings = settings
+        self._warning_percents = tuple(sorted(warning_percents))
 
     @property
     def batch_size(self) -> int:
@@ -63,7 +65,7 @@ class SlaService:
                     OutboxEventType.SLA_OVERDUE_NOTIFICATION,
                     AggregateType.PENDING_REPLY,
                     ticket.id,
-                    payload.model_dump(mode="json"),
+                    payload=payload.model_dump(mode="json"),
                     available_at=now,
                 )
                 if event_id is not None:
@@ -74,6 +76,54 @@ class SlaService:
                 "sla breaches escalated", extra={"event": "sla_escalated", "count": len(created)}
             )
         return created
+
+    def escalate_warnings(self) -> list[int]:
+        """Queue "SLA is running out" warnings for tickets that crossed a threshold.
+
+        Only the highest threshold reached is sent (a short SLA or a scanner delay can
+        cross 50% and 75% at once); each threshold is sent at most once per ticket.
+        """
+        now = self._clock.now()
+        created: list[int] = []
+        with self._uow_factory() as uow:
+            claimed = uow.pending.claim_warnings(
+                now, self._warning_percents, self._settings.scan_batch_size
+            )
+            for ticket in claimed:
+                level = self._reached_level(ticket, now)
+                chat = uow.chats.get(ticket.chat_id)
+                if level is None or chat is None:
+                    continue
+                ticket.warning_level = level
+                payload = self._build_payload(uow, ticket, chat).model_copy(
+                    update={"kind": "warning", "warning_percent": level}
+                )
+                event_id = uow.outbox.add_if_absent(
+                    OutboxEventType.SLA_WARNING,
+                    AggregateType.PENDING_REPLY,
+                    ticket.id,
+                    payload=payload.model_dump(mode="json"),
+                    available_at=now,
+                    dedup_key=str(level),
+                )
+                if event_id is not None:
+                    created.append(event_id)
+            uow.commit()
+        if created:
+            logger.info(
+                "sla warnings queued", extra={"event": "sla_warning", "count": len(created)}
+            )
+        return created
+
+    def _reached_level(self, ticket: PendingReply, now: datetime) -> int | None:
+        window = (ticket.deadline_at - ticket.created_at).total_seconds()
+        elapsed = (now - ticket.created_at).total_seconds()
+        reached = [
+            p
+            for p in self._warning_percents
+            if p > ticket.warning_level and elapsed >= window * p / 100
+        ]
+        return max(reached) if reached else None
 
     @staticmethod
     def _build_payload(

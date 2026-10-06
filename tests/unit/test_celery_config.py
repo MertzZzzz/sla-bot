@@ -49,6 +49,9 @@ def test_scan_task_drains_backlog_in_batches(monkeypatch: pytest.MonkeyPatch) ->
         def escalate_due(self) -> list[int]:
             return self.batches.pop(0) if self.batches else []
 
+        def escalate_warnings(self) -> list[int]:
+            return [9]
+
     class Ctx:
         sla = FakeSla()
 
@@ -59,5 +62,5 @@ def test_scan_task_drains_backlog_in_batches(monkeypatch: pytest.MonkeyPatch) ->
         "apply_async",
         lambda args, queue: enqueued.append(args),
     )
-    assert sla_task.scan_due_replies.apply().get() == 5
-    assert enqueued == [(1,), (2,), (3,), (4,), (5,)]
+    assert sla_task.scan_due_replies.apply().get() == 6
+    assert enqueued == [(9,), (1,), (2,), (3,), (4,), (5,)]  # warnings first
