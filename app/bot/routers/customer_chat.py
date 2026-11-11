@@ -20,6 +20,7 @@ from app.bot.extractors import GROUP_TYPES, topic_of
 from app.bot.filters.is_global_admin import IsGlobalAdmin
 from app.bot.invites import format_invite_report, invite_pilot
 from app.bot.menus import chat_screen
+from app.bot.notification_topic import route_to_new_topic
 from app.bot.services import BotServices
 from app.core.config import Settings
 from app.core.enums import ChatType
@@ -54,7 +55,8 @@ async def cmd_chat_add(
         topic_name=topic_name,
     )
     await _try_delete(message)
-    delivered = await announce_chat(bot, services, chat, actor, created=created)
+    routed = await route_to_new_topic(bot, services, chat, actor.id) if created else None
+    delivered = await announce_chat(bot, services, chat, actor, created=created, extra=routed)
     if not delivered:
         # The admin has not started the bot yet: leave a short hint in the group.
         await message.answer(GROUP_HINT)
@@ -79,6 +81,7 @@ async def announce_chat(
     *,
     created: bool,
     send_to_actor: bool = True,
+    extra: str | None = None,
 ) -> bool:
     """Send the chat card to the admin (and others for new chats); True if the admin got it."""
     await ensure_chat_link(bot, services, chat)
@@ -91,6 +94,8 @@ async def announce_chat(
         if created
         else "ℹ️ Этот чат уже подключён. Текущие настройки:"
     )
+    if extra:
+        notice += f"\n{extra}"
     screen = chat_screen(details, notice=notice)
     recipients = [actor.id] if send_to_actor else []
     if created:

@@ -12,6 +12,7 @@ from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.methods import (
     CreateChatInviteLink,
+    CreateForumTopic,
     EditMessageText,
     GetChat,
     GetChatMember,
@@ -24,7 +25,9 @@ from aiogram.types import (
     Chat,
     ChatFullInfo,
     ChatInviteLink,
+    ChatMemberAdministrator,
     ChatMemberMember,
+    ForumTopic,
     InlineKeyboardMarkup,
     Message,
     MessageEntity,
@@ -65,6 +68,9 @@ class RecordingSession(BaseSession):
         self.invites_forbidden = False
         # Chats visible to the bot via getChat (the bot is a member of them).
         self.chats: dict[int, ChatFullInfo] = {}
+        # Chats where the bot is an admin allowed to manage topics.
+        self.topic_admin_chats: set[int] = set()
+        self.next_topic_id = 5000
 
     async def make_request(
         self,
@@ -81,6 +87,10 @@ class RecordingSession(BaseSession):
                 raise TelegramBadRequest(method, "Bad Request: chat not found")
             return chat
         if isinstance(method, GetChatMember):
+            if method.user_id == BOT_USER.id and int(method.chat_id) in self.topic_admin_chats:
+                return ChatMemberAdministrator.model_construct(  # type: ignore[call-arg]
+                    status="administrator", user=BOT_USER, can_manage_topics=True
+                )
             if method.user_id == BOT_USER.id and int(method.chat_id) in self.chats:
                 return ChatMemberMember(user=BOT_USER)
             user = self.members.get(method.user_id)
@@ -98,6 +108,13 @@ class RecordingSession(BaseSession):
                 is_revoked=False,
                 name=method.name,
                 member_limit=method.member_limit,
+            )
+        if isinstance(method, CreateForumTopic):
+            if int(method.chat_id) not in self.topic_admin_chats:
+                raise TelegramBadRequest(method, "Bad Request: not enough rights to create a topic")
+            self.next_topic_id += 1
+            return ForumTopic(
+                message_thread_id=self.next_topic_id, name=method.name, icon_color=0x6FB9F0
             )
         if isinstance(method, SendMessage | EditMessageText):
             chat_id = int(getattr(method, "chat_id", 0) or 0)

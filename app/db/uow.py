@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from app.db.repositories.admins import AdminRepository, SyncAdminRepository
 from app.db.repositories.audit import AuditRepository, SyncAuditRepository
+from app.db.repositories.bot_settings import BotSettingsRepository
 from app.db.repositories.chats import (
     ChatMemberRepository,
     MonitoredChatRepository,
@@ -39,6 +40,7 @@ class UnitOfWork:
     admins: AdminRepository
     pilot: PilotRepository
     outbox: AsyncOutboxRepository
+    bot_settings: BotSettingsRepository
 
     def __init__(self, session_factory: async_sessionmaker[AsyncSession]) -> None:
         self._session_factory = session_factory
@@ -55,6 +57,7 @@ class UnitOfWork:
         self.admins = AdminRepository(self.session)
         self.pilot = PilotRepository(self.session)
         self.outbox = AsyncOutboxRepository(self.session)
+        self.bot_settings = BotSettingsRepository(self.session)
         return self
 
     async def __aexit__(
