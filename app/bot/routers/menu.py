@@ -27,6 +27,7 @@ from app.bot.filters.is_global_admin import IsGlobalAdmin
 from app.bot.filters.settings_context import IsSettingsChat
 from app.bot.invites import format_invite_report, invite_pilot
 from app.bot.menus import Screen
+from app.bot.notification_topic import route_to_new_topic, topic_rights_problem
 from app.bot.routers.customer_chat import announce_chat
 from app.bot.services import BotServices
 from app.bot.texts import HELP_TEXT, NOT_ADMIN_PRIVATE, PILOT_WELCOME
@@ -34,6 +35,7 @@ from app.bot.user_input import (
     MAX_SHARED_USERS,
     PEOPLE_USAGE,
     PICK_CUSTOMER_CHAT_REQUEST_ID,
+    PICK_DEFAULT_NOTIFY_REQUEST_ID,
     USAGE,
     UserInputError,
     from_read,
@@ -57,6 +59,7 @@ from app.schemas.commands import (
 )
 from app.schemas.users import TelegramUserData
 from app.services.admins import AdminChange
+from app.services.bot_settings import DefaultNotificationTarget
 from app.services.formatting import escape, format_duration
 
 logger = logging.getLogger(__name__)
@@ -71,6 +74,7 @@ class MenuInput(StatesGroup):
     sla = State()
     timezone = State()
     notification = State()
+    default_notification = State()
     responsible = State()
     responder = State()
     admin = State()
@@ -155,6 +159,7 @@ INPUT_ACTIONS = {
     A.RESPONSIBLE_INPUT,
     A.RESPONDER_INPUT,
     A.NOTIFICATIONS_INPUT,
+    A.DEFAULT_NOTIFY_INPUT,
 }
 
 
@@ -357,6 +362,89 @@ async def chats_list(ctx: Ctx) -> Screen:
     return menus.chats_screen(await ctx.services.chats.list_chats(), ctx.data.p, private=private)
 
 
+# default notification forum
+
+
+async def _default_notify_screen(ctx: Ctx, notice: str | None = None) -> Screen:
+    return menus.default_notification_screen(
+        await ctx.services.bot_settings.default_notification(),
+        private=ctx.message.chat.type == "private",
+        notice=notice,
+    )
+
+
+@on(A.DEFAULT_NOTIFY)
+async def default_notify(ctx: Ctx) -> Screen:
+    return await _default_notify_screen(ctx)
+
+
+@on(A.DEFAULT_NOTIFY_PICK)
+async def default_notify_pick(ctx: Ctx) -> Screen:
+    await ctx.message.answer(
+        "👇 Выбор группы",
+        reply_markup=pick_chat_keyboard(PICK_DEFAULT_NOTIFY_REQUEST_ID, forum=True),
+    )
+    return await _prompt(
+        ctx,
+        MenuInput.default_notification,
+        "🔔 <b>Группа уведомлений по умолчанию</b>\n\nНажмите «👥 Выбрать группу» внизу "
+        "экрана и выберите группу с темами, где уже есть бот. Или введите chat_id вручную.",
+        cancel_to=A.DEFAULT_NOTIFY,
+        reply_kb=True,
+    )
+
+
+@on(A.DEFAULT_NOTIFY_INPUT)
+async def default_notify_input(ctx: Ctx) -> Screen:
+    return await _prompt(
+        ctx,
+        MenuInput.default_notification,
+        "🔔 <b>Группа уведомлений по умолчанию</b>\n\nВведите chat_id группы с темами: "
+        "<code>-1001234567890</code>.",
+        cancel_to=A.DEFAULT_NOTIFY,
+    )
+
+
+@on(A.DEFAULT_NOTIFY_HERE)
+async def default_notify_here(ctx: Ctx) -> Screen:
+    try:
+        notice = await _set_default_notify(ctx.bot, ctx.services, ctx.message.chat.id, ctx.actor_id)
+    except TargetError as exc:
+        return await _default_notify_screen(ctx, notice=f"⚠️ {exc}")
+    ctx.toast = "Группа уведомлений по умолчанию сохранена"
+    return await _default_notify_screen(ctx, notice=notice)
+
+
+@on(A.DEFAULT_NOTIFY_CLEAR)
+async def default_notify_clear(ctx: Ctx) -> Screen:
+    await ctx.services.bot_settings.set_default_notification(None, ctx.actor_id)
+    ctx.toast = "Отключено: новые чаты без уведомлений по умолчанию"
+    return await _default_notify_screen(ctx)
+
+
+async def _set_default_notify(bot: Bot, services: BotServices, raw_id: int, actor_id: int) -> str:
+    """Validate and save the default notification forum; returns the notice to show."""
+    target = await resolve_target(bot, raw_id, None)
+    if target.chat_type not in ("group", "supergroup"):
+        msg = "Нужна группа с темами (форум), а не личный чат."
+        raise TargetError(msg)
+    if any(c.telegram_chat_id == target.chat_id for c in await services.chats.list_chats()):
+        msg = "Это чат заказчика: топики уведомлений в нём увидит заказчик. Выберите другую группу."
+        raise TargetError(msg)
+    if not target.is_forum:
+        msg = (
+            f"В группе «{escape(target.title)}» не включены темы. Включите их в настройках "
+            "группы («Темы») или выберите другую группу."
+        )
+        raise TargetError(msg)
+    await services.bot_settings.set_default_notification(
+        DefaultNotificationTarget(chat_id=target.chat_id, title=target.title), actor_id
+    )
+    notice = f"✅ Группа уведомлений по умолчанию: «{escape(target.title)}»"
+    problem = await topic_rights_problem(bot, target.chat_id)
+    return f"{notice}\n⚠️ {problem}" if problem else notice
+
+
 @on(A.CHAT_ADD_PICK)
 async def chat_add_pick(ctx: Ctx) -> Screen:
     await ctx.message.answer(
@@ -406,10 +494,15 @@ async def _connect_chat(
         thread_id=thread_id,
         topic_name=topic_name,
     )
-    await announce_chat(bot, services, chat, actor, created=created, send_to_actor=False)
+    routed = await route_to_new_topic(bot, services, chat, actor.id) if created else None
+    await announce_chat(
+        bot, services, chat, actor, created=created, send_to_actor=False, extra=routed
+    )
     details = await services.chats.get_card(chat.id)
     assert details is not None
     notice = "✅ Чат подключён к мониторингу." if created else "ℹ️ Этот чат уже подключён."
+    if routed:
+        notice += f"\n{routed}"
     return menus.chat_screen(details, notice=notice), created
 
 
@@ -877,6 +970,31 @@ async def input_notification(
     await _chat_updated(
         message, state=state, services=services, bot=bot, changes=changes, notice=notice
     )
+
+
+@router.message(StateFilter(MenuInput.default_notification), IsGlobalAdmin(), NOT_COMMAND)
+async def input_default_notification(
+    message: Message, state: FSMContext, services: BotServices, bot: Bot
+) -> None:
+    assert message.from_user is not None
+    if message.chat_shared is not None:  # Telegram's native chat picker
+        raw_id = message.chat_shared.chat_id
+    else:
+        try:
+            raw_id = int((message.text or "").strip())
+        except ValueError:
+            await message.reply("Введите chat_id числом, например <code>-1001234567890</code>.")
+            return
+    try:
+        notice = await _set_default_notify(bot, services, raw_id, message.from_user.id)
+    except TargetError as exc:
+        await message.reply(str(exc))
+        return
+    target = await services.bot_settings.default_notification()
+    screen = menus.default_notification_screen(
+        target, private=message.chat.type == "private", notice=notice
+    )
+    await _finish(message, state, bot, screen)
 
 
 @router.message(StateFilter(*USER_STATES), IsGlobalAdmin(), NOT_COMMAND)

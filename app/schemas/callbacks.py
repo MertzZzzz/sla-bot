@@ -51,6 +51,12 @@ class MenuAction(StrEnum):
     PILOT_DELETE_CONFIRM = "py"
     INVITE = "iv"
     INVITE_RUN = "ir"
+    # default notification forum (a topic per new chat)
+    DEFAULT_NOTIFY = "gn"
+    DEFAULT_NOTIFY_PICK = "gg"
+    DEFAULT_NOTIFY_HERE = "gh"
+    DEFAULT_NOTIFY_INPUT = "gi"
+    DEFAULT_NOTIFY_CLEAR = "gx"
     # chats
     CHATS = "cl"
     CHAT = "cc"

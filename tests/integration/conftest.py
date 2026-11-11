@@ -80,7 +80,8 @@ def clean_db(sync_factory: sessionmaker[Session]) -> None:
             text(
                 "TRUNCATE outbox_events, reply_events, chat_configuration_audit, pending_replies,"
                 " chat_responders, chat_members, pending_reply_messages, bot_admins,"
-                " pilot_participants, monitored_chats, telegram_users RESTART IDENTITY CASCADE"
+                " pilot_participants, monitored_chats, telegram_users, bot_settings"
+                " RESTART IDENTITY CASCADE"
             )
         )
         session.commit()

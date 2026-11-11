@@ -15,6 +15,7 @@ from app.schemas.chats import MonitoredChatDetails, MonitoredChatRead
 from app.schemas.pending_replies import PendingReplyRead
 from app.schemas.users import TelegramUserRead
 from app.services.admins import AdminView
+from app.services.bot_settings import DefaultNotificationTarget
 from app.services.formatting import (
     TELEGRAM_MESSAGE_LIMIT,
     escape,
@@ -133,8 +134,42 @@ def main_menu() -> Screen:
         keyboard(
             [button("👮 Администраторы", A.ADMINS), button("💬 Чаты", A.CHATS)],
             [button("🧪 Участники пилота", A.PILOT)],
+            [button("🔔 Уведомления по умолчанию", A.DEFAULT_NOTIFY)],
         ),
     )
+
+
+# --- default notification forum -----------------------------------------------------
+
+
+def default_notification_screen(
+    target: DefaultNotificationTarget | None, *, private: bool, notice: str | None = None
+) -> Screen:
+    current = (
+        f"«{escape(target.title)}» (<code>{target.chat_id}</code>)"
+        if target
+        else f"{NOT_SET} — у новых чатов уведомления не настроены"
+    )
+    lines = [
+        *([notice, ""] if notice else []),
+        "🔔 <b>Уведомления по умолчанию</b>",
+        "",
+        f"Группа: {current}",
+        "",
+        "При подключении нового чата бот создаёт в этой группе топик с названием чата "
+        "и направляет туда его уведомления. Настройки уже подключённых чатов не меняются.",
+        "Группа должна быть форумом (с темами), а бот — администратором с правом "
+        "«Управление темами».",
+    ]
+    rows = []
+    if private:
+        rows.append([button("👥 Выбрать группу", A.DEFAULT_NOTIFY_PICK)])
+    else:
+        rows.append([button("📍 Использовать эту группу", A.DEFAULT_NOTIFY_HERE)])
+    rows.append([button("✏️ Указать chat_id вручную", A.DEFAULT_NOTIFY_INPUT)])
+    if target:
+        rows.append([button("✖ Отключить", A.DEFAULT_NOTIFY_CLEAR)])
+    return Screen("\n".join(lines), keyboard(*rows, [button("« Меню", A.HOME)]))
 
 
 # --- administrators -----------------------------------------------------------------

@@ -32,6 +32,12 @@ pytestmark = pytest.mark.integration
 ADMIN_TG = User(id=ADMIN_ID, is_bot=False, first_name="Admin", username="boss")
 STRANGER = User(id=9999, is_bot=False, first_name="Stranger")
 PRIVATE = Chat(id=ADMIN_ID, type="private")
+MAIN_SECTIONS = {
+    "👮 Администраторы",
+    "💬 Чаты",
+    "🧪 Участники пилота",
+    "🔔 Уведомления по умолчанию",
+}
 ADMIN_CHAT = Chat(id=ADMIN_CHAT_ID, type="supergroup", title="Админы", is_forum=True)
 
 
@@ -121,9 +127,9 @@ async def open_chat(nav: Nav) -> None:
 
 async def test_main_menu_sections(nav: Nav) -> None:
     await nav.send("/start")
-    assert set(nav.buttons()) == {"👮 Администраторы", "💬 Чаты", "🧪 Участники пилота"}
+    assert set(nav.buttons()) == MAIN_SECTIONS
     await nav.send("/menu")  # same menu
-    assert set(nav.buttons()) == {"👮 Администраторы", "💬 Чаты", "🧪 Участники пилота"}
+    assert set(nav.buttons()) == MAIN_SECTIONS
 
 
 async def test_non_admin_is_refused(nav: Nav, tg: RecordingSession) -> None:

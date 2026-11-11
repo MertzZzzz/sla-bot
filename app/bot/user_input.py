@@ -58,10 +58,16 @@ def pick_user_keyboard(max_quantity: int = 1) -> ReplyKeyboardMarkup:
 PICK_CHAT_TEXT = "👥 Выбрать группу"
 PICK_CHAT_REQUEST_ID = 2
 PICK_CUSTOMER_CHAT_REQUEST_ID = 3
+PICK_DEFAULT_NOTIFY_REQUEST_ID = 4
 
 
-def pick_chat_keyboard(request_id: int = PICK_CHAT_REQUEST_ID) -> ReplyKeyboardMarkup:
-    """Native Telegram group picker (private chat only): the bot gets the exact chat ID."""
+def pick_chat_keyboard(
+    request_id: int = PICK_CHAT_REQUEST_ID, *, forum: bool = False
+) -> ReplyKeyboardMarkup:
+    """Native Telegram group picker (private chat only): the bot gets the exact chat ID.
+
+    ``forum=True`` offers only groups with topics enabled.
+    """
     return ReplyKeyboardMarkup(
         keyboard=[
             [
@@ -70,6 +76,7 @@ def pick_chat_keyboard(request_id: int = PICK_CHAT_REQUEST_ID) -> ReplyKeyboardM
                     request_chat=KeyboardButtonRequestChat(
                         request_id=request_id,
                         chat_is_channel=False,
+                        chat_is_forum=True if forum else None,
                         bot_is_member=True,
                         request_title=True,
                     ),

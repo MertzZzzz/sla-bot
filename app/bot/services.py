@@ -8,6 +8,7 @@ from app.core.config import Settings
 from app.db.uow import UnitOfWork
 from app.services.admins import AdminService
 from app.services.audit import AuditService
+from app.services.bot_settings import BotSettingsService
 from app.services.chat_settings import ChatSettingsService
 from app.services.clock import Clock, SystemClock
 from app.services.message_links import MessageLinkService
@@ -31,6 +32,7 @@ class BotServices:
     reassignment: ReassignmentService
     admins: AdminService
     pilot: PilotService
+    bot_settings: BotSettingsService
 
 
 def build_bot_services(
@@ -62,4 +64,5 @@ def build_bot_services(
         reassignment=ReassignmentService(uow_factory, chats),
         admins=AdminService(uow_factory, clock, settings.telegram.admin_telegram_ids),
         pilot=PilotService(uow_factory),
+        bot_settings=BotSettingsService(uow_factory),
     )
